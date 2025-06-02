@@ -1,0 +1,913 @@
+;;;
+;;; Universal Monitor SuperH
+;;;   Copyright (C) 2021 Haruo Asano
+;;;
+
+	INCLUDE	"config.inc"
+	
+	INCLUDE	"../common.inc"
+
+;;;
+;;; Register address definition
+;;; 
+
+	;; Bus State Controller
+BCR1:	EQU	$FFFF8620
+BCR2:	EQU	$FFFF8622
+
+	;; Pin Function Controller
+PAIORL:	EQU	$FFFF8386
+PACRH:	EQU	$FFFF8388
+PACRL1:	EQU	$FFFF838C
+PACRL2:	EQU	$FFFF838E
+PDCRH1:	EQU	$FFFF83A8
+PDCRH2:	EQU	$FFFF83AA
+
+;;;
+;;; ROM area
+;;;
+
+	ORG	$00000000
+
+	;; 00-07
+	DC.L	CSTART		; Power ON reset
+	DC.L	STACK
+	DC.L	CSTART		; Manual reset
+	DC.L	STACK
+
+	DC.L	DUMMY_H		; General iilegal instruction
+	DC.L	DUMMY_H		; (Reserved)
+	DC.L	DUMMY_H		; Slot illegal instruction
+	DC.L	DUMMY_H		; (Reserved)
+
+	;; 08-0F
+	DC.L	DUMMY_H		; (Reserved)
+	DC.L	DUMMY_H		; CPU address error
+	DC.L	DUMMY_H		; DMAC/DTC address error
+	DC.L	DUMMY_H		; NMI
+
+	DC.L	DUMMY_H		; User break
+	DC.L	DUMMY_H		; (Reserved)
+	DC.L	DUMMY_H		; (Reserved)
+	DC.L	DUMMY_H		; (Reserved)
+
+	;; 10-17
+	DC.L	DUMMY_H		; (Reserved)
+	DC.L	DUMMY_H		; (Reserved)
+	DC.L	DUMMY_H		; (Reserved)
+	DC.L	DUMMY_H		; (Reserved)
+
+	DC.L	DUMMY_H		; (Reserved)
+	DC.L	DUMMY_H		; (Reserved)
+	DC.L	DUMMY_H		; (Reserved)
+	DC.L	DUMMY_H		; (Reserved)
+
+	;; 18-1F
+	DC.L	DUMMY_H		; (Reserved)
+	DC.L	DUMMY_H		; (Reserved)
+	DC.L	DUMMY_H		; (Reserved)
+	DC.L	DUMMY_H		; (Reserved)
+
+	DC.L	DUMMY_H		; (Reserved)
+	DC.L	DUMMY_H		; (Reserved)
+	DC.L	DUMMY_H		; (Reserved)
+	DC.L	DUMMY_H		; (Reserved)
+
+	;; 20-27
+	DC.L	DUMMY_H		; Trap instruction
+	DC.L	DUMMY_H		; Trap instruction
+	DC.L	DUMMY_H		; Trap instruction
+	DC.L	DUMMY_H		; Trap instruction
+
+	DC.L	DUMMY_H		; Trap instruction
+	DC.L	DUMMY_H		; Trap instruction
+	DC.L	DUMMY_H		; Trap instruction
+	DC.L	DUMMY_H		; Trap instruction
+
+	;; 28-2F
+	DC.L	DUMMY_H		; Trap instruction
+	DC.L	DUMMY_H		; Trap instruction
+	DC.L	DUMMY_H		; Trap instruction
+	DC.L	DUMMY_H		; Trap instruction
+
+	DC.L	DUMMY_H		; Trap instruction
+	DC.L	DUMMY_H		; Trap instruction
+	DC.L	DUMMY_H		; Trap instruction
+	DC.L	DUMMY_H		; Trap instruction
+
+	;; 30-37
+	DC.L	DUMMY_H		; Trap instruction
+	DC.L	DUMMY_H		; Trap instruction
+	DC.L	DUMMY_H		; Trap instruction
+	DC.L	DUMMY_H		; Trap instruction
+
+	DC.L	DUMMY_H		; Trap instruction
+	DC.L	DUMMY_H		; Trap instruction
+	DC.L	DUMMY_H		; Trap instruction
+	DC.L	DUMMY_H		; Trap instruction
+
+	;; 38-3F
+	DC.L	DUMMY_H		; Trap instruction
+	DC.L	DUMMY_H		; Trap instruction
+	DC.L	DUMMY_H		; Trap instruction
+	DC.L	DUMMY_H		; Trap instruction
+
+	DC.L	DUMMY_H		; Trap instruction
+	DC.L	DUMMY_H		; Trap instruction
+	DC.L	DUMMY_H		; Trap instruction
+	DC.L	DUMMY_H		; Trap instruction
+
+	;; 40-47
+	DC.L	DUMMY_H		; IRQ0
+	DC.L	DUMMY_H		; IRQ1
+	DC.L	DUMMY_H		; IRQ2
+	DC.L	DUMMY_H		; IRQ3
+
+	DC.L	DUMMY_H		; IRQ4
+	DC.L	DUMMY_H		; IRQ5
+	DC.L	DUMMY_H		; IRQ6
+	DC.L	DUMMY_H		; IRQ7
+
+CSTART:
+	;; Initialize SH7045 Bus State Controller
+	MOV.L	#$FFFF8620,R13	; BCR1
+	MOV	#BCR1_V,R14
+	MOV.W	R14,@R13
+	MOV.L	#$FFFF8622,R13	; BCR2
+	MOV	#BCR2_V,R14
+	MOV.W	R14,@R13
+
+	;; Initialize SH7045 Pin Function Controller
+	MOV.L	#PAIORL,R13
+	MOV.W	#PAIORL_V,R14
+	MOV.W	R14,@R13
+	MOV.L	#PACRH,R13
+	MOV.W	#PACRH_V,R14
+	MOV.W	R14,@R13
+	MOV.L	#PACRL1,R13
+	MOV.W	#PACRL1_V,R14
+	MOV.W	R14,@R13
+	MOV.L	#PACRL2,R13
+	MOV.W	#PACRL2_V,R14
+	MOV.W	R14,@R13
+	MOV.L	#PDCRH1,R13
+	MOV.W	#PDCRH1_V,R14
+	MOV.W	R14,@R13
+	MOV.L	#PDCRH2,R13
+	MOV.W	#PDCRH2_V,R14
+	MOV.W	R14,@R13
+
+	BSR	INIT
+	NOP
+
+	MOV	#$00400000,R0
+	MOV	#DSADDR,R14
+	MOV.L	R0,@R14
+	MOV	#GADDR,R14
+	MOV.L	R0,@R14
+	MOV	#SADDR,R14
+	MOV.L	R0,@R14
+
+	;; Opening message
+	MOV.L	#OPNMSG,R8
+	BSR	STROUT
+	NOP
+
+WSTART:
+	MOV.L	#PROMPT,R8
+	BSR	STROUT
+	NOP
+	BSR	GETLIN
+	NOP
+	MOV.L	#INBUF,R8
+	BSR	SKIPSP
+	NOP
+	BSR	UPPER
+	NOP
+	TST	#$FF,R0
+	BT	WSTART
+
+	CMP/EQ	#'D',R0
+	BT	DUMP
+	CMP/EQ	#'G',R0
+	BF	M01
+	BRA	GO
+	NOP
+M01:	
+	CMP/EQ	#'S',R0
+	BF	M02
+	BRA	SETM
+	NOP
+M02:
+	CMP/EQ	#'L',R0
+	BF	M03
+	BRA	LOADH
+	NOP
+M03:
+
+ERR:
+	MOV.L	#ERRMSG,R8
+	BSR	STROUT
+	NOP
+	BRA	WSTART
+	NOP
+	
+	LTORG
+
+;;;
+;;; Dump memory
+;;;
+
+DUMP:
+	BSR	SKIPSP
+	ADD	#1,R8
+	BSR	RDHEX		; 1st arg.
+	NOP
+	CMP/PL	R2
+	BT	DP0
+	;; No arg.
+	BSR	SKIPSP
+	NOP
+	CMP/EQ	#0,R0
+	BF	ERR
+	MOV	#DSADDR,R14
+	MOV.L	@R14,R10	; DSADDR
+	MOV	R10,R11
+	MOV	#128,R14
+	EXTU.B	R14,R14
+	BRA	DPM
+	ADD	R14,R11		; DEADDR
+
+	;; 1st arg. found
+DP0:
+	MOV	R1,R10		; DSADDR
+	BSR	SKIPSP
+	NOP
+	CMP/EQ	#',',R0
+	BT	DP1
+	CMP/EQ	#0,R0
+	BF	ERR
+	;; No 2nd arg.
+	MOV	R10,R11
+	MOV	#128,R14
+	EXTU.B	R14,R14
+	BRA	DPM
+	ADD	R14,R11		; DEADDR
+
+DP1:
+	BSR	SKIPSP
+	ADD	#1,R8
+	BSR	RDHEX
+	NOP
+	BSR	SKIPSP
+	NOP
+	CMP/PL	R2
+	BF	ERR
+	CMP/EQ	#0,R0
+	BF	ERR
+	MOV	R1,R11
+	ADD	#1,R11		; DEADDR
+
+	;; DUMP main
+DPM:
+	MOV	R10,R9
+	MOV	#$F0,R14
+	EXTS.B	R14,R14
+	AND	R14,R9
+	XOR	R2,R2		; DSTATE
+DPM0:
+	BSR	DPL
+	NOP
+	BSR	CONST
+	NOP
+	CMP/EQ	#0,R0
+	BF	DPM1
+	MOV	#2,R14
+	CMP/GT	R2,R14		; DSTATE
+	BT	DPM0
+	MOV	#DSADDR,R14
+	BRA	WSTART
+	MOV.L	R11,@R14
+DPM1:
+	BSR	CONIN
+	NOP
+	MOV	#DSADDR,R14
+	BRA	WSTART
+	MOV.L	R9,@R14
+
+DPL:
+	STS	PR,@-R15
+	BSR	HEXOUT8
+	MOV.L	R9,R0
+	MOV.L	#DSEP0,R8
+	BSR	STROUT
+	NOP
+	MOV	#INBUF,R12
+	MOV	#16,R3
+DPL0:
+	BSR	DPB
+	NOP
+	ADD	#-1,R3
+	CMP/PL	R3
+	BT	DPL0
+
+	MOV	#DSEP1,R8
+	BSR	STROUT
+	NOP
+
+	MOV	#INBUF,R12
+	MOV	#16,R3
+DPL1:
+	MOV.B	@R12+,R0
+	MOV	#' ',R7
+	CMP/GT	R0,R7
+	BT	DPL2
+	MOV	#$7F,R7
+	CMP/GE	R7,R0
+	BT	DPL2
+	BSR	CONOUT
+	NOP
+	BRA	DPL3
+	NOP
+DPL2:
+	BSR	CONOUT
+	MOV	#'.',R0
+DPL3:
+	ADD	#-1,R3
+	CMP/PL	R3
+	BT	DPL1
+	LDS	@R15+,PR
+	BRA	CRLF
+	NOP
+
+	;; DUMP byte
+DPB:
+	STS	PR,@-R15
+
+	BSR	CONOUT
+	MOV	#' ',R0
+	CMP/PL	R2		; DSTATE
+	BT	DPB2
+	;; Dump state 0
+	CMP/EQ	R10,R9
+	BT	DPB1
+	;; Still 0 or 2
+DPB0:
+	BSR	CONOUT
+	MOV	#' ',R0
+	BSR	CONOUT
+	MOV.B	R0,@R12
+	ADD	#1,R12
+	LDS	@R15+,PR
+	RTS
+	ADD	#1,R9
+	;; Found start address
+DPB1:
+	MOV	#1,R2		; DSTATE
+DPB2:
+	MOV	#1,R14
+	CMP/EQ	R14,R2
+	BF	DPB0
+	;; Dump state 1
+	MOV.B	@R9+,R0
+	BSR	HEXOUT2
+	MOV.B	R0,@R12
+	ADD	#1,R12
+	CMP/EQ	R9,R11
+	BT	DPB3
+	LDS	@R15+,PR
+	RTS
+	NOP
+	;; Found end address
+DPB3:
+	LDS	@R15+,PR
+	RTS
+	MOV	#2,R2
+
+	LTORG
+
+;;;
+;;; GO address
+;;;
+	
+GO:
+	BSR	SKIPSP
+	ADD	#1,R8
+	BSR	RDHEX
+	NOP
+	BSR	SKIPSP
+	NOP
+	CMP/EQ	#0,R0
+	BT	GE
+	MOV	#GADDR,R14
+	CMP/PL	R2
+	BF	G0
+	MOV.L	R1,@R14
+G0:
+	MOV.L	@R14,R9
+	JMP	@R9
+	NOP
+GE:
+	BRA	ERR
+	NOP
+
+;;;
+;;; SET memory
+;;;
+
+SETM:
+	BSR	SKIPSP
+	ADD	#1,R8
+	BSR	RDHEX
+	NOP
+	BSR	SKIPSP
+	NOP
+	CMP/EQ	#0,R0
+	BT	SM00
+	BRA	ERR
+	NOP
+SM00:	
+	MOV	R1,R9
+	CMP/PL	R2
+	BT	SM0
+	MOV	#SADDR,R14
+	MOV.L	@R14,R9
+SM0:
+SM1:
+	BSR	HEXOUT8
+	MOV	R9,R0
+	MOV	#DSEP1,R8
+	BSR	STROUT
+	NOP
+	BSR	HEXOUT2
+	MOV.B	@R9,R0
+	BSR	CONOUT
+	MOV	#' ',R0
+	BSR	GETLIN
+	NOP
+	MOV	#INBUF,R8
+	BSR	SKIPSP
+	NOP
+	CMP/EQ	#0,R0
+	BF	SM2
+	;; Empty (increment address)
+	ADD	#1,R9
+	MOV	#SADDR,R14
+	BRA	SM1
+	MOV.L	R9,@R14
+SM2:
+	CMP/EQ	#'-',R0
+	BF	SM3
+	;; '-' (Decrement address)
+	ADD	#-1,R9
+	MOV	#SADDR,R14
+	BRA	SM1
+	MOV.L	R9,@R14
+SM3:
+	CMP/EQ	#'.',R0
+	BF	SM4
+	;; '.' (Quit)
+	BRA	WSTART
+	NOP
+SM4:	
+	BSR	RDHEX
+	NOP
+	CMP/PL	R2
+	BT	SM5
+	BRA	ERR
+	NOP
+SM5:
+	MOV.B	R1,@R9
+	ADD	#1,R9
+	MOV	#SADDR,R14
+	BRA	SM1
+	MOV.L	R9,@R14	
+
+	LTORG
+
+;;;
+;;; Load HEX file
+;;;
+
+LOADH:
+	BSR	SKIPSP
+	ADD	#1,R8
+	BSR	RDHEX
+	NOP
+	BSR	SKIPSP
+	NOP
+	CMP/EQ	#0,R0
+	BF	LHE
+LH0:
+	BSR	CONIN
+	NOP
+	BSR	UPPER
+	NOP
+	CMP/EQ	#'S',R0
+	BT	LHS0
+LH1:
+	CMP/EQ	#':',R0
+	BT	LHI0
+	;; Skip to EOL
+LH2:
+	CMP/EQ	#CR,R0
+	BT	LH0
+	CMP/EQ	#LF,R0
+	BT	LH0
+LH3:
+	BSR	CONIN
+	NOP
+	BRA	LH2
+	NOP
+LHE:
+	BRA	ERR
+	NOP
+
+	;; Intel HEX
+LHI0:
+	BSR	HEXIN
+	NOP
+	MOV	R0,R2		; Length
+
+	BSR	HEXIN
+	MOV	R0,R3		; Checksum
+	MOV	R0,R8		; Address H
+
+	BSR	HEXIN
+	ADD	R0,R3		; Checksum
+	SHLL8	R8
+	OR	R0,R8		; Address L
+	ADD	R0,R3		; Checksum
+
+	BSR	HEXIN
+	ADD	R1,R8		; Offset
+	MOV	R0,R4		; RECTYP
+	ADD	R0,R3		; Checksum
+	CMP/EQ	#$00,R0
+	BT	LHI00
+	CMP/EQ	#$01,R0
+	BT	LHI00
+	BRA	LH3		; Skip unsupported record type
+	NOP
+LHI00:
+	CMP/PL	R2
+	BF	LHI3
+LHI1:
+	BSR	HEXIN
+	NOP
+	ADD	R0,R3		; Checksum
+
+	CMP/PL	R4		; RECTYP
+	BT	LHI2
+
+	MOV.B	R0,@R8
+	ADD	#1,R8
+LHI2:
+	ADD	#-1,R2
+	CMP/PL	R2
+	BT	LHI1
+LHI3:
+	BSR	HEXIN
+	NOP
+	ADD	R3,R0		; Checksum
+	EXTU.B	R0,R0
+	CMP/EQ	#0,R0
+	BF	LHIE		; Checksum error
+	CMP/PL	R4		; RECTYP
+	BF	LH3
+	BRA	WSTART
+	NOP
+LHIE:
+	MOV	#IHEMSG,R8
+	BSR	STROUT
+	NOP
+	BRA	WSTART
+	NOP
+
+	;; Motorola S record
+LHS0:	
+	BSR	CONIN
+	NOP
+	XOR	R4,R4		; RECTYP
+	MOV	#2,R5		; 2 byte address
+	CMP/EQ	#'1',R0
+	BT	LHS01
+	CMP/EQ	#'9',R0
+	BT	LHS00
+	ADD	#1,R5		; 3 byte address
+	CMP/EQ	#'2',R0
+	BT	LHS01
+	CMP/EQ	#'8',R0
+	BT	LHS00
+	ADD	#1,R5		; 4 byte address
+	CMP/EQ	#'3',R0
+	BT	LHS01
+	CMP/EQ	#'7',R0
+	BT	LHS00
+	BRA	LH3		; Skip unsupported record type
+	NOP
+LHS00:
+	ADD	#1,R4		; RECTYP (end)
+LHS01:
+
+	BSR	HEXIN
+	NOP
+	MOV	R0,R2		; Length+3
+	MOV	R0,R3		; checksum
+
+	XOR	R8,R8
+LHS02:
+	BSR	HEXIN
+	SHLL8	R8
+	OR	R0,R8
+	ADD	R0,R3		; checksum
+
+	ADD	#-1,R2
+	ADD	#-1,R5
+	CMP/PL	R5
+	BT	LHS02
+
+	;; Add offset
+	ADD	R1,R8
+
+	ADD	#-1,R2
+	CMP/PL	R2
+	BF	LHS3
+LHS1:
+	BSR	HEXIN
+	NOP
+	ADD	R0,R3		; Checksum
+
+	CMP/PL	R4		; RECTYP
+	BT	LHS2
+
+	MOV.B	R0,@R8
+	ADD	#1,R8
+LHS2:
+	ADD	#-1,R2
+	CMP/PL	R2
+	BT	LHS1
+LHS3:
+	BSR	HEXIN
+	NOP
+	ADD	R3,R0		; Checksum
+	EXTS.B	R0,R0
+	CMP/EQ	#-1,R0
+	BF	LHSE
+
+	CMP/PL	R4		; RECTYP
+	BT	LHSR
+	BRA	LH3
+	NOP
+LHSE:
+	MOV	#SHEMSG,R8
+	BSR	STROUT
+	NOP
+LHSR:
+	BRA	WSTART
+	NOP
+
+	LTORG
+
+;;;
+;;; Other support routines
+;;;
+
+STROUT:
+	STS	PR,@-R15
+STRO0:
+	MOV.B	@R8+,R0
+	TST	#$FF,R0
+	BT	STROE
+	BSR	CONOUT
+	NOP
+	BRA	STRO0
+	NOP
+STROE:	
+	LDS	@R15+,PR
+	RTS
+	NOP
+
+HEXOUT8:
+	STS	PR,@-R15
+	MOV.L	R0,@-R15
+	BSR	HEXOUT4
+	SWAP.W	R0,R0
+	MOV.L	@R15+,R0
+	LDS	@R15+,PR
+HEXOUT4:
+	STS	PR,@-R15
+	MOV.L	R0,@-R15
+	BSR	HEXOUT2
+	SWAP.B	R0,R0
+	MOV.L	@R15+,R0
+	LDS	@R15+,PR
+HEXOUT2:
+	STS	PR,@-R15
+	MOV.L	R0,@-R15
+	SHLR2	R0
+	BSR	HEXOUT1
+	SHLR2	R0
+	MOV.L	@R15+,R0
+	LDS	@R15+,PR
+HEXOUT1:
+	STS	PR,@-R15
+	AND	#$0F,R0
+	ADD	#'0',R0
+	MOV	#'9',R14
+	CMP/GT	R14,R0
+	BF	HO10
+	ADD	#'A'-'9'-1,R0
+HO10:
+	LDS	@R15+,PR
+	BRA	CONOUT
+	NOP
+
+HEXIN:
+	STS	PR,@-R15
+	BSR	HI0
+	XOR	R0,R0
+	SHLL2	R0
+	SHLL2	R0
+	LDS	@R15+,PR
+HI0:
+	STS	PR,@-R15
+	MOV	R0,R6
+	BSR	CONIN
+	NOP
+	BSR	UPPER
+	NOP
+	MOV	#'0',R7
+	CMP/GT	R0,R7
+	BT	HIR
+	MOV	#'9',R7
+	CMP/GE	R0,R7
+	BT	HI1
+	MOV	#'A',R7
+	CMP/GT	R0,R7
+	BT	HIR
+	MOV	#'F',R7
+	CMP/GE	R0,R7
+	BF	HIR
+	ADD	#-('A'-'9'-1),R0
+HI1:
+	ADD	#-'0',R0
+	OR	R6,R0
+HIR:
+	LDS	@R15+,PR
+	RTS
+	NOP
+
+CRLF:
+	STS	PR,@-R15
+	BSR	CONOUT
+	MOV.B	#CR,R0
+	LDS	@R15+,PR
+	BRA	CONOUT
+	MOV.B	#LF,R0
+
+GETLIN:
+	STS	PR,@-R15
+	MOV.L	#INBUF,R8
+	XOR	R1,R1
+GL0:
+	BSR	CONIN
+	NOP
+	CMP/EQ	#CR,R0
+	BT	GLE
+	CMP/EQ	#LF,R0
+	BT	GLE
+	CMP/EQ	#BS,R0
+	BT	GLB
+	CMP/EQ	#DEL,R0
+	BT	GLB
+	MOV	#' ',R7
+	CMP/GT	R0,R7
+	BT	GL0
+	MOV	#BUFLEN-1,R7
+	CMP/GT	R1,R7
+	BF	GL0		; Too long
+	ADD	#1,R1
+	BSR	CONOUT
+	MOV.B	R0,@R8
+	BRA	GL0
+	ADD	#1,R8
+GLB:
+	CMP/PL	R1
+	BF	GL0
+	ADD	#-1,R8
+	ADD	#-1,R1
+	BSR	CONOUT
+	MOV.B	#BS,R0
+	BSR	CONOUT
+	MOV.B	#' ',R0
+	BSR	CONOUT
+	MOV.B	#BS,R0
+	BRA	GL0
+	NOP
+GLE:
+	MOV	#0,R0
+	MOV.B	R0,@R8
+	LDS	@R15+,PR
+	BRA	CRLF
+	NOP
+
+	LTORG
+
+SKIPSP:
+	MOV.B	@R8+,R0
+	CMP/EQ	#' ',R0
+	BT	SKIPSP
+	RTS
+	ADD	#-1,R8
+
+UPPER:
+	MOV.B	#'a',R7
+	CMP/GT	R0,R7
+	BT	UPR
+	MOV.B	#'z',R7
+	CMP/GT	R7,R0
+	BT	UPR
+	ADD	#'A'-'a',R0
+UPR:
+	RTS
+	NOP
+
+RDHEX:
+	STS	PR,@-R15
+	XOR	R2,R2		; Count
+	XOR	R1,R1		; Value
+RH0:
+	BSR	UPPER
+	MOV.B	@R8,R0
+	MOV	#'0',R7
+	CMP/GT	R0,R7
+	BT	RHE
+	MOV	#'9',R7
+	CMP/GE	R0,R7
+	BT	RH1
+	MOV	#'A',R7
+	CMP/GT	R0,R7
+	BT	RHE
+	MOV	#'F',R7
+	CMP/GE	R0,R7
+	BF	RHE
+	ADD	#-('A'-'9'-1),R0
+RH1:
+	ADD	#-'0',R0
+	SHLL2	R1
+	SHLL2	R1
+	OR	R0,R1
+	ADD	#1,R8
+	BRA	RH0
+	ADD	#1,R2
+RHE:
+	LDS	@R15+,PR
+	RTS
+	NOP
+
+	LTORG
+
+DUMMY_H:
+
+;;;
+;;; Data area
+;;;
+
+OPNMSG:	DC.B	CR,LF,"Universal Monitor SuperH",CR,LF,$00
+
+PROMPT:	DC.B	"] ",$00
+
+IHEMSG:	DC.B	"Error ihex",CR,LF,$00
+SHEMSG:	DC.B	"Error srec",CR,LF,$00
+ERRMSG:	DC.B	"Error",CR,LF,$00
+
+DSEP0:	DC.B	" :",$00
+DSEP1:	DC.B	" : ",$00
+IHEXER:	DC.B	":00000001FF",CR,LF,$00
+SRECER: DC.B	"S9030000FC",CR,LF,$00
+
+	
+
+	ALIGN	2
+
+	IF USE_DEV_SCI
+	INCLUDE	"dev/dev_sci.asm"
+	ENDIF
+
+	IF USE_DEV_EMILY
+	INCLUDE	"dev/dev_emily.asm"
+	ENDIF
+
+;;;
+;;; RAM area
+;;;
+
+	ORG	WORK_B
+
+INBUF:	DS.B	BUFLEN		; Line input buffer
+DSADDR:	DS.L	1		; DUMP start address
+GADDR:	DS.L	1		; GO address
+SADDR:	DS.L	1		; SET address
+
+	END

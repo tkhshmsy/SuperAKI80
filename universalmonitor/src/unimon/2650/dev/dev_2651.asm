@@ -1,0 +1,45 @@
+;;;
+;;;	2651 (PCI) Console Driver
+;;;
+
+PCIRCV:	EQU	PCI_B + H'00'	; Receive holding register
+PCITRM:	EQU	PCI_B + H'00'	; Transmit holding register
+PCISR:	EQU	PCI_B + H'01'	; Status register
+PCIMR:	EQU	PCI_B + H'02'	; Mode registers 1 / 2
+PCICR:	EQU	PCI_B + H'03'	; Command register
+
+INIT:
+	LODI,R0	MR1_V
+	WRTE,R0	PCIMR
+	LODI,R0	MR2_V
+	WRTE,R0	PCIMR
+
+	LODI,R0	CR_V
+	WRTE,R0	PCICR
+
+	RETC,UN
+
+CONIN:
+	REDE,R0	PCISR
+	ANDI,R0	H'02'
+	BCTR,EQ	CONIN
+
+	REDE,R0	PCIRCV
+
+	RETC,UN
+
+CONST:
+	REDE,R0	PCISR
+	ANDI,R0	H'02'
+	RRR,R0
+
+	RETC,UN
+
+CONOUT:
+	REDE,R1	PCISR
+	ANDI,R1	H'01'
+	BCTR,EQ	CONOUT
+
+	WRTE,R0	PCITRM
+
+	RETC,UN

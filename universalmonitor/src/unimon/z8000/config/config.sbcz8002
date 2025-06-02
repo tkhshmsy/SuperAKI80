@@ -1,0 +1,51 @@
+;;; -*- asm -*-
+;;;
+;;; Universal Monitor Z8000 config file (for SBCZ8002)
+;;;
+
+
+;;;
+;;; CPU
+;;;
+
+	CPU	Z8002
+
+;SEG_MODE = 0			; Force non-seg mode on Z8001/Z8003, otherwise leave undefined
+
+;;;
+;;; Memory
+;;;
+
+ROM_B:	EQU	0000H		; Reset vector (Currently, must be 0000H)
+PSA_B:	EQU	0100H		; PSA (Must be aligned to 256)
+CODE_B:	EQU	0200H		; Code area
+
+RAM_B:	EQU	8000H
+WORK_B:	EQU	8F80H
+STACK:	EQU	8F80H		; System stack pointer
+USTACK:	EQU	8F00H		; Normal stack pointer
+
+BUFLEN:	EQU	24
+
+;;;
+;;; Options
+;;;
+
+USE_REGCMD = 1
+
+;;;
+;;; Zilog Z8530
+;;;
+
+USE_DEV_8530 = 1
+	IF USE_DEV_8530
+SCCAC:	EQU	05H
+SCCAD:	EQU	07H
+SCCBC:	EQU	01H
+SCCBD:	EQU	03H
+WR4_V:	EQU	44H		; x16, Stop Bit 1, No-Parity
+WR3_V:	EQU	0C0H		; 8 Bit, Enable
+WR5_V:	EQU	0E2H		; DTR, 8 Bit, RTS
+WR11_V:	EQU	50H		; Use BR output (for both Tx and Rx)
+BRGTC:	EQU	11		; Baud Rate Generator Time Contant
+	ENDIF

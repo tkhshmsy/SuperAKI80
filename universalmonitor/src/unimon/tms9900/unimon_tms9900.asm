@@ -1,0 +1,465 @@
+;;;
+;;; Universal Monitor TMS9900
+;;;   Copyright (C) 2020 Haruo Asano
+;;;
+
+	INCLUDE	"config.inc"
+
+	INCLUDE	"../common.inc"
+	INCLUDE	"tms9900.inc"
+	
+;;;
+;;; Vector Area
+;;;
+
+	ORG	0000H
+	
+	WORD	MONWP		; Reset (WP)
+	WORD	CSTART		; Reset (PC)
+
+	;;
+	;;
+	;;
+
+	ORG	0100H
+	
+CSTART:
+	LI	R15,STACK
+	BL	@INIT
+
+	LI	R0,0000H
+	MOV	R0,@DSADDR
+	MOV	R0,@SADDR
+	MOV	R0,@GADDR
+
+	;; Opening message
+	LI	R4,OPNMSG
+	BL	@STROUT
+
+WSTART:	
+	LI	R4,PROMPT
+	BL	@STROUT
+	BL	@GETLIN
+	LI	R4,INBUF
+	BL	@SKIPSP
+	MOVB	*R4,R0
+	JEQ	WSTART
+	BL	@UPPER
+	
+	LI	R1,'D' << 8
+	CB	R0,R1
+	JNE	M00
+	B	@DUMP
+M00:
+	LI	R1,'G' << 8
+	CB	R0,R1
+	JNE	M01
+	B	@GO
+M01:
+	LI	R1,'S' << 8
+	CB	R0,R1
+	JNE	M02
+	B	@SETM
+M02:	
+ERR:
+	LI	R4,ERRMSG
+	BL	@STROUT
+	JMP	WSTART
+
+;;;
+;;; Dump memory
+;;;
+DUMP:
+	INC	R4
+	BL	@SKIPSP
+	BL	@RDHEX
+	MOV	R3,R3
+	JNE	DP0
+
+	;; No arg.
+	BL	@SKIPSP
+	MOVB	*R4,R0
+	JNE	ERR
+DP00:
+	LI	R0,128
+	A	@DSADDR,R0
+	MOV	R0,@DEADDR
+	JMP	DPM
+
+	;; 1st arg. found
+DP0:
+	MOV	R2,@DSADDR
+	BL	@SKIPSP
+	MOVB	*R4,R0
+	LI	R1,',' << 8
+	CB	R0,R1
+	JEQ	DP1
+	MOVB	R0,R0
+	JNE	ERR
+	;; No 2nd arg.
+	JMP	DP00
+DP1:
+	INC	R4
+	BL	@SKIPSP
+	BL	@RDHEX
+	MOV	R3,R3
+	JEQ	ERR
+	BL	@SKIPSP
+	MOVB	*R4,R0
+	JNE	ERR
+	INC	R2
+	MOV	R2,@DEADDR
+
+	;; DUMP main
+DPM:
+	MOV	@DSADDR,R5
+	ANDI	R5,0FFF0H
+	CLR	R3		; DSTATE
+DPM0:
+	BL	@DPL
+	BL	@CONST
+	MOVB	R0,R0
+	JNE	DPM1
+	CI	R3,2
+	JL	DPM0
+	MOV	@DEADDR,@DSADDR
+	JMP	WSTART
+DPM1:
+	MOV	R5,@DSADDR
+	BL	@CONIN
+	JMP	WSTART
+
+	;; Dump line
+DPL:
+	PUSH	R11
+	MOV	R5,R0
+	BL	@HEXOUT4
+	LI	R4,DSEP0
+	BL	@STROUT
+	LI	R6,INBUF
+DPL0:
+	BL	@DPB
+	MOV	R5,R0
+	ANDI	R0,000FH
+	JNE	DPL0
+
+	LI	R4,DSEP1
+	BL	@STROUT
+
+	;; Print ASCII area
+	LI	R6,INBUF
+DPL1:
+	MOVB	*R6+,R0
+	LI	R1,' ' << 8
+	CB	R0,R1
+	JL	DPL2
+	LI	R1,7F00H
+	CB	R0,R1
+	JHE	DPL2
+	JMP	DPL3
+DPL2:
+	LI	R0,'.' << 8
+DPL3:	
+	BL	@CONOUT
+	CI	R6,INBUF + 16
+	JNE	DPL1
+	POP	R11
+	B	@CRLF
+
+	;; Dump byte
+DPB:
+	PUSH	R11
+	LI	R0,' ' << 8
+	BL	@CONOUT
+	MOV	R3,R3
+	JNE	DPB2
+	;; Dump state 0
+	C	R5,@DSADDR
+	JEQ	DPB1
+	;; Still 0 or 2
+DPB0:
+	LI	R0,' ' << 8
+	MOVB	R0,*R6+
+	BL	@CONOUT
+	LI	R0,' ' << 8
+	BL	@CONOUT
+	INC	R5
+	RTS
+	;; Found start address
+DPB1:
+	LI	R3,1
+DPB2:
+	CI	R3,1
+	JNE	DPB0		; Dump state 2
+	;; Dump state 1
+	MOVB	*R5+,R0
+	MOVB	R0,*R6+
+	BL	@HEXOUT2
+	C	R5,@DEADDR
+	JNE	DPBE
+	;; Found end address
+	LI	R3,2
+DPBE:
+	RTS
+
+;;;
+;;; Go address
+;;;
+GO:
+	INC	R4
+	BL	@SKIPSP
+	BL	@RDHEX
+	BL	@SKIPSP
+	MOVB	*R4,R0
+	JEQ	G00
+	B	@ERR
+G00:
+	MOV	R3,R3
+	JEQ	G0
+	MOV	R2,@GADDR
+G0:
+	MOV	@GADDR,R0
+	B	*R0
+
+;;;
+;;; Set memory
+;;;
+SETM:
+	INC	R4
+	BL	@SKIPSP
+	BL	@RDHEX
+	BL	@SKIPSP
+	MOVB	*R4,R0
+	JEQ	SM0
+	B	@ERR
+SM0:
+	MOV	R3,R3
+	JEQ	SM1
+	MOV	R2,@SADDR
+SM1:
+	MOV	@SADDR,R0
+	BL	@HEXOUT4
+	LI	R4,DSEP1
+	BL	@STROUT
+	MOV	@SADDR,R5
+	MOVB	*R5,R0
+	BL	@HEXOUT2
+	LI	R0,' ' << 8
+	BL	@CONOUT
+	BL	@GETLIN
+	LI	R4,INBUF
+	BL	@SKIPSP
+	MOVB	*R4,R0
+	JNE	SM2
+	;; Empty (Increment address)
+	INC	@SADDR
+	JMP	SM1
+SM2:
+	LI	R1,'-' << 8
+	CB	R0,R1
+	JNE	SM3
+	;; '-' (Decrement address)
+	DEC	@SADDR
+	JMP	SM1
+SM3:
+	LI	R1,'.' << 8
+	CB	R0,R1
+	JNE	SM4
+	B	@WSTART
+SM4:
+	BL	@RDHEX
+	MOV	R3,R3
+	JNE	SM40
+	B	@ERR
+SM40:
+	SWPB	R2
+	MOVB	R2,*R5
+	INC	@SADDR
+	JMP	SM1
+
+	JMP	$
+	
+;;;
+;;; Other support routines
+;;;
+
+STROUT:
+	MOV	R11,R10
+STRO0:	
+	MOVB	*R4+,R0
+	JEQ	STROE
+	BL	@CONOUT
+	JMP	STRO0
+STROE:
+	B	*R10		; Return
+
+HEXOUT4:
+	PUSH	R11
+	MOV	R0,R2
+	BL	@HEXOUT2
+	MOV	R2,R0
+	SWPB	R0
+	POP	R11
+HEXOUT2:
+	PUSH	R11
+	MOV	R0,R7
+	SRA	R0,4
+	BL	@HEXOUT1
+	MOV	R7,R0
+	POP	R11
+HEXOUT1:
+	PUSH	R11
+	ANDI	R0,0F00H
+	AI	R0,'0' << 8
+	CI	R0,('9' + 1) << 8
+	JL	HO0
+	AI	R0,('A' - '9' - 1) << 8
+HO0:
+	BL	@CONOUT
+	RTS
+	
+CRLF:
+	PUSH	R11
+	LI	R0,CR << 8
+	BL	@CONOUT
+	LI	R0,LF << 8
+	MOV	R12,R11
+	POP	R11
+	B	@CONOUT
+	
+GETLIN:
+	LI	R4,INBUF
+	MOV	R11,R10
+GL0:
+	BL	@CONIN
+	LI	R1,CR << 8
+	CB	R0,R1
+	JEQ	GLE
+	LI	R1,LF << 8
+	CB	R0,R1
+	JEQ	GLE
+	LI	R1,BS << 8
+	CB	R0,R1
+	JEQ	GLB
+	LI	R1,DEL << 8
+	CB	R0,R1
+	JEQ	GLB
+	LI	R1,' ' << 8
+	CB	R0,R1
+	JL	GL0
+	LI	R1,80H << 8
+	CB	R0,R1
+	JHE	GL0
+	CI	R4,INBUF+BUFLEN-1
+	JHE	GL0		; Too long
+	MOVB	R0,*R4+
+	BL	@CONOUT
+	JMP	GL0
+GLB:
+	CI	R4,INBUF
+	JEQ	GL0
+	DEC	R4
+	LI	R0,BS << 8
+	BL	@CONOUT
+	LI	R0,' ' << 8
+	BL	@CONOUT
+	LI	R0,BS << 8
+	BL	@CONOUT
+	JMP	GL0
+GLE:	
+	BL	@CRLF
+	CLR	R0
+	MOVB	R0,*R4
+	B	*R10		; Return
+
+SKIPSP:
+	LI	R1,' ' << 8
+	CB	*R4+,R1
+	JEQ	SKIPSP
+	DEC	R4
+	RT
+
+UPPER:
+	LI	R1,'a' << 8
+	CB	R0,R1
+	JL	UPE
+	LI	R1,('z' + 1) << 8
+	CB	R0,R1
+	JHE	UPE
+	LI	R1,('A' - 'a') << 8
+	AB	R1,R0
+UPE:
+	RT
+
+RDHEX:
+	PUSH	R11
+	CLR	R2		; Value
+	CLR	R3		; Count
+RH0:
+	MOVB	*R4,R0
+	BL	@UPPER
+	LI	R1,'0' << 8
+	CB	R0,R1
+	JL	RHE
+	LI	R1,('9' + 1) << 8
+	CB	R0,R1
+	JL	RH1
+	LI	R1,'A' << 8
+	CB	R0,R1
+	JL	RHE
+	LI	R1,('F' + 1) << 8
+	CB	R0,R1
+	JHE	RHE
+	LI	R1,('A' - '9' - 1) << 8
+	SB	R1,R0
+RH1:
+	LI	R1,'0' << 8
+	SB	R1,R0
+	SWPB	R0
+	ANDI	R0,000FH
+	SLA	R2,4
+	A	R0,R2
+	INC	R3
+	INC	R4
+	JMP	RH0
+RHE:
+	RTS
+
+	
+OPNMSG:
+	BYTE	CR,LF,"Universal Monitor TMS9900",CR,LF,00H
+PROMPT:
+	BYTE	"] ",00H
+
+ERRMSG:
+	BYTE	"Error",CR,LF,00H
+DSEP0:
+	BYTE	" :",00H
+DSEP1:
+	BYTE	" : ",00H
+
+	ALIGN	2
+	
+	IF	USE_DEV_EMILY
+	INCLUDE	"dev/dev_emily.asm"
+	ENDIF
+
+;;;
+;;; RAM area
+;;;
+
+	;;
+	;; Work Area
+	;; 
+	
+	ORG	WORK_B
+
+MONWP:	BSS	2*16
+
+INBUF:	BSS	BUFLEN		; Line input buffer
+DSADDR:	BSS	2		; Dump start address
+DEADDR:	BSS	2		; Dump end address
+GADDR:	BSS	2		; Go address
+SADDR:	BSS	2		; Set address
+
+	END

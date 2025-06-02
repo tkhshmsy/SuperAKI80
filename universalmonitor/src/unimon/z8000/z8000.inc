@@ -1,0 +1,54 @@
+;;; -*- asm -*-
+;;;
+;;; Z8000 specific definitions
+;;;
+
+	IF (MOMCPU = 8001H) || (MOMCPU = 8003H)
+
+	;; Z8001 / Z8003
+SEG_CPU = 1
+	IFNDEF SEG_MODE
+SEG_MODE = 1
+	ENDIF
+	
+	ELSE
+
+	;; Z8002 / Z8004
+SEG_CPU = 0
+SEG_MODE = 0
+
+	ENDIF
+
+
+;;; Registers
+
+	IF SEG_MODE
+
+AR1	REG	RR0
+AR3	REG	RR2
+AR5	REG	RR4
+AR7	REG	RR6
+AR9	REG	RR8
+AR11	REG	RR10
+AR13	REG	RR12
+AR15	REG	RR14
+ASP	REG	RR14
+
+	ELSE
+
+AR1	REG	R1
+AR3	REG	R3
+AR5	REG	R5
+AR7	REG	R7
+AR9	REG	R9
+AR11	REG	R11
+AR13	REG	R13
+AR15	REG	R15
+ASP	REG	R15
+
+	ENDIF
+
+;;; Functions
+
+offset	function	x,(x & 0FFFFH)
+segment	function	x,(x >> 16)

@@ -1,0 +1,50 @@
+;;;
+;;;
+;;; 
+
+
+INIT:
+	;; Reset USART
+	LD	A,00H
+	OUT	(USARTC),A
+	LD	A,00H
+	OUT	(USARTC),A
+	LD	A,00H
+	OUT	(USARTC),A
+	LD	A,40H
+	OUT	(USARTC),A
+
+	;;
+	LD	A,4EH
+	OUT	(USARTC),A
+
+	;;
+	LD	A,37H
+	OUT	(USARTC),A
+
+	RET
+
+CONIN:
+	IN	A,(USARTC)
+	AND	02H
+	JR	Z,CONIN
+	IN	A,(USARTD)
+
+	RET
+
+CONST:
+	IN	A,(USARTC)
+	AND	02H
+
+	RET
+
+CONOUT:
+	PUSH	AF
+COUT0:	IN	A,(USARTC)
+	AND	01H
+	JR	Z,COUT0
+	POP	AF
+	OUT	(USARTD),A
+
+	RET
+	

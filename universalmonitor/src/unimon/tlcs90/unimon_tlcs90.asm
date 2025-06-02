@@ -1,0 +1,1565 @@
+;;; 
+;;; Universal Monitor for Toshiba TLCS-90
+;;;   Copyright (C) 2019,2020 Haruo Asano
+;;;
+
+	CPU	90c141
+
+TARGET:	equ	"90C802"
+
+
+	INCLUDE	"config.inc"
+
+	INCLUDE	"../common.inc"
+	INCLUDE	"tlcs90.inc"
+
+	
+;;; 
+;;; ROM area
+;;;
+
+	ORG	0000H
+	DI
+	JP	CSTART
+
+	ORG	0010H
+	JP	SWIH
+
+	;;
+	;; Entry point
+	;;
+
+	ORG	ENTRY+0		; Cold start
+E_CSTART:
+	JP	CSTART
+	
+	ORG	ENTRY+8		; Warm start
+E_WSTART:
+	JP	WSTART
+
+	ORG	ENTRY+16	; Console output
+E_CONOUT:
+	JP	CONOUT
+
+	ORG	ENTRY+24	; (Console) String output
+E_STROUT:
+	JP	STROUT
+
+	ORG	ENTRY+32	; Console input
+E_CONIN:
+	JP	CONIN
+
+	ORG	ENTRY+40	; Console status
+E_CONST:
+	JP	CONST
+
+	;;
+	;;
+	;; 
+
+	ORG	0100H
+CSTART:
+	;; Disable WDT
+	XOR	A,A
+	LD	(WDMOD),A
+	LD	A,0B1H
+	LD	(WDCR),A
+
+	LD	SP,STACK
+
+	;; P40-P43 setup
+	LD	(P4CR),P4CR_V
+
+	CALL    INIT
+
+	LD	(CURBNK),00H
+	LD	HL,8000H
+	LD	(DSADDR),HL
+	LD	(SADDR),HL
+	LD	(GADDR),HL
+	LD	A,'I'
+	LD	(HEXMOD),A
+
+	IF USE_REGCMD
+
+	;; Initialize register value
+	XOR	A,A
+	LD	HL,REG_B
+	LD	B,REG_E-REG_B
+IR0:
+	LD	(HL),A
+	INC	HL
+	DJNZ	IR0
+
+	LD	HL,STACK
+	LD	(REGSP),HL
+
+	ENDIF
+
+	;; Opening message
+	LD	HL,OPNMSG
+	CALL	STROUT
+
+	;; CPU identification
+	IF USE_IDENT
+	LD	(BX),00H
+	LD	A,(BX)
+	CP	A,0FFH
+	JR	Z,ID_16
+	CP	A,0F0H
+	JR	Z,ID_20
+	;; Unknown
+	LD	HL,IMUK
+	XOR	A,A
+	JR	IDE
+	;; 16-bit address
+ID_16:
+	LD	HL,IM16
+	XOR	A,A
+	JR	IDE
+	;; 20-bit address
+ID_20:
+	LD	HL,IM20
+	LD	A,10H
+IDE:
+	LD	(PSPEC),A
+	CALL	STROUT
+	ELSE
+	XOR	A,A
+	LD	(BX),A
+	LD	(PSPEC),A
+	ENDIF
+
+	LD	(BY),00H
+
+WSTART:
+	LD	HL,PROMPT
+	CALL	STROUT
+	CALL	GETLIN
+	LD	HL,INBUF
+	CALL	SKIPSP
+	CALL	UPPER
+	OR	A,A
+	JR	Z,WSTART
+
+	CP	A,'D'
+	JR	Z,DUMP
+	CP	A,'G'
+	JP	Z,GO
+	CP	A,'S'
+	JP	Z,SETM
+
+	CP	A,'L'
+	JP	Z,LOADH
+	CP	A,'P'
+	JP	Z,SAVEH
+
+	CP	A,'I'
+	JP	Z,PIN
+	CP	A,'O'
+	JP	Z,POUT
+
+	IF USE_REGCMD
+	CP	A,'R'
+	JP	Z,REG
+	ENDIF
+
+ERR:
+	LD	HL,ERRMSG
+	CALL	STROUT
+	JR	WSTART
+
+;;; 
+;;; Dump memory
+;;; 
+DUMP:
+	LD	A,(CURBNK)
+	LD	(BY),A
+	INC	HL
+	CALL	SKIPSP
+	CALL	RDADR		; 1st arg.
+	LD	A,C
+	OR	A,A
+	JR	NZ,DP0
+	;; No arg.
+	CALL	SKIPSP
+	LD	A,(HL)
+	OR	A,A
+	JR	NZ,ERR
+	LD	HL,(DSADDR)
+	LD	BC,128
+	ADD	HL,BC
+	LD	(DEADDR),HL
+	JR	DPM
+
+	;; 1st arg. found
+DP0:
+	LD	(DSADDR),DE
+	CALL	SKIPSP
+	LD	A,(HL)
+	CP	A,','
+	JR	Z,DP1
+	OR	A,A
+	JR	NZ,ERR
+	;; No 2nd arg.
+	LD	HL,128
+	ADD	HL,DE
+	LD	(DEADDR),HL
+	JR	DPM
+DP1:
+	INC	HL
+	CALL	SKIPSP
+	CALL	RDHEX
+	CALL	SKIPSP
+	LD	A,C
+	OR	A,A
+	JR	Z,ERR
+	LD	A,(HL)
+	OR	A,A
+	JP	NZ,ERR
+	INC	DE
+	LD	(DEADDR),DE
+DPM:
+	;; DUMP main
+	LD	HL,(DSADDR)
+	LD	A,0F0H
+	AND	A,L
+	LD	L,A
+	XOR	A,A
+	LD	(DSTATE),A
+DPM0:
+	PUSH	HL
+	CALL	DPL
+	POP	HL
+	LD	BC,16
+	ADD	HL,BC
+	CALL	CONST
+	OR	A,A
+	JR	NZ,DPM1
+	LD	A,(DSTATE)
+	CP	A,2
+	JR	C,DPM0
+	LD	HL,(DEADDR)
+	LD	(DSADDR),HL
+	JP	WSTART
+DPM1:
+	LD	(DSADDR),HL
+	CALL	CONIN
+	JP	WSTART
+
+DPL:
+	;; DUMP line
+	CALL	ADROUT
+	PUSH	HL
+	LD	HL,DSEP0
+	CALL	STROUT
+	POP	HL
+	LD	IX,INBUF
+	LD	B,16
+DPL0:
+	CALL	DPB
+	DJNZ	DPL0
+
+	LD	HL,DSEP1
+	CALL	STROUT
+
+	LD	HL,INBUF
+	LD	B,16
+DPL1:
+	LD	A,(HL)
+	INC	HL
+	CP	A,' '
+	JR	C,DPL2
+	CP	A,7FH
+	JR	NC,DPL2
+	CALL	CONOUT
+	JR	DPL3
+DPL2:
+	LD	A,'.'
+	CALL	CONOUT
+DPL3:
+	DJNZ	DPL1
+	JP	CRLF
+
+DPB:	; Dump byte
+	LD	A,' '
+	CALL	CONOUT
+	LD	A,(DSTATE)
+	OR	A,A
+	JR	NZ,DPB2
+	; Dump state 0
+	LD	A,(DSADDR)	; Low byte
+	CP	A,L
+	JR	NZ,DPB0
+	LD	A,(DSADDR+1)	; High byte
+	CP	A,H
+	JR	Z,DPB1
+DPB0:	; Still 0 or 2
+	LD	A,' '
+	CALL	CONOUT
+	LD	A,' '
+	CALL	CONOUT
+	LD	(IX),A
+	INC	HL
+	INC	IX
+	RET
+DPB1:	; Found start address
+	LD	A,1
+	LD	(DSTATE),A
+DPB2:
+	LD	A,(DSTATE)
+	CP	A,1
+	JR	NZ,DPB0
+	;; Dump state 1
+	LD	IY,HL
+	LD	A,(IY)		; for 20-bit address (BY:IY)
+	LD	(IX),A
+	CALL	HEXOUT2
+	INC	HL
+	INC	IX
+	LD	A,(DEADDR)	; Low byte
+	CP	A,L
+	RET	NZ
+	LD	A,(DEADDR+1)	; High byte
+	CP	A,H
+	RET	NZ
+	; Found end address
+	LD	A,2
+	LD	(DSTATE),A
+	RET
+
+;;;
+;;; GO address
+;;; 
+GO:
+	INC	HL
+	CALL	SKIPSP
+	CALL	RDHEX
+	LD	A,(HL)
+	OR	A,A
+	JP	NZ,ERR
+	LD	A,C
+	OR	A,A
+	JR	Z,G0
+
+	IF USE_REGCMD
+
+	LD	(REGPC),DE
+G0:
+	LD	A,(REGBX)
+	AND	A,0FH
+	LD	(BX),A
+	LD	A,(REGBY)
+	AND	A,0FH
+	LD	(BY),A
+	LD	HL,(REGSP)
+	LD	SP,HL
+	LD	HL,(REGPC)
+	PUSH	HL
+	LD	IX,(REGIX)
+	LD	IY,(REGIY)
+	LD	HL,(REGAFX)
+	PUSH	HL
+	LD	BC,(REGBCX)
+	LD	DE,(REGDEX)
+	LD	HL,(REGHLX)
+	EXX
+	POP	AF
+	EX	AF,AF'
+	LD	HL,(REGAF)
+	PUSH	HL
+	LD	BC,(REGBC)
+	LD	DE,(REGDE)
+	LD	HL,(REGHL)
+	RETI			; POP AF / POP PC
+
+	ELSE
+	
+	LD	(GADDR),DE
+G0:
+	LD	HL,(GADDR)
+	JP	(HL)
+
+	ENDIF
+
+;;;
+;;; SET memory
+;;; 
+SETM:
+	LD	A,(CURBNK)
+	LD	(BY),A
+	INC	HL
+	CALL	SKIPSP
+	CALL	RDADR
+	LD	A,C
+	OR	A,A
+	JR	Z,SM0
+	LD	(SADDR),DE
+SM0:	
+	CALL	SKIPSP
+	LD	A,(HL)
+	OR	A,A
+	JP	NZ,ERR
+	LD	DE,(SADDR)
+	EX	DE,HL
+SM1:
+	CALL	ADROUT
+	PUSH	HL
+	LD	HL,DSEP1
+	CALL	STROUT
+	POP	IY
+	LD	A,(IY)		; for 20-bit address (BY:IY)
+	PUSH	IY
+	CALL	HEXOUT2
+	LD	A,' '
+	CALL	CONOUT
+	CALL	GETLIN
+	LD	HL,INBUF
+	CALL	SKIPSP
+	LD	A,(HL)
+	OR	A,A
+	JR	NZ,SM2
+	;; Empty  (Increment address)
+	POP	HL
+	INC	HL
+	LD	(SADDR),HL
+	JR	SM1
+SM2:
+	CP	A,'-'
+	JR	NZ,SM3
+	;; '-'  (Decrement address)
+	POP	HL
+	DEC	HL
+	LD	(SADDR),HL
+	JR	SM1
+SM3:
+	CP	A,'.'
+	JR	NZ,SM4
+	POP	HL
+	LD	(SADDR),HL
+	JP	WSTART
+SM4:
+	CALL	RDHEX
+	LD	A,C
+	OR	A,A
+	POP	HL
+	JP	Z,ERR
+	LD	IY,HL
+	LD	(IY),E		; for 20-bit address (BY:IY)
+	INC	HL
+	LD	(SADDR),HL
+	JR	SM1
+
+;;;
+;;; LOAD HEX file
+;;;
+LOADH:
+	INC	HL
+	CALL	SKIPSP
+	CALL	RDADR
+	CALL	SKIPSP
+	LD	A,(HL)
+	OR	A,A
+	JP	NZ,ERR
+
+	LD	A,C
+	OR	A,A
+	JR	NZ,LH0
+
+	LD	DE,0		;Offset
+LH0:
+	CALL	CONIN
+	CALL	UPPER
+	CP	A,'S'
+	JR	Z,LHS0
+LH1:
+	CP	A,':'
+	JR	Z,LHI0
+LH2:
+	;; Skip to EOL
+	CP	A,CR
+	JR	Z,LH0
+	CP	A,LF
+	JR	Z,LH0
+LH3:
+	CALL	CONIN
+	JR	LH2
+
+LHI0:
+	CALL	HEXIN
+	LD	C,A		; Checksum
+	LD	B,A		; Length
+
+	CALL	HEXIN
+	LD	H,A		; Address H
+	ADD	A,C
+	LD	C,A
+
+	CALL	HEXIN
+	LD	L,A		; Address L
+	ADD	A,C
+	LD	C,A
+
+	;; Add offset
+	ADD	HL,DE
+
+	CALL	HEXIN
+	LD	(RECTYP),A
+	ADD	A,C
+	LD	C,A		; Checksum
+
+	LD	A,B
+	OR	A,A
+	JR	Z,LHI3
+	LD	IY,HL
+LHI1:
+	CALL	HEXIN
+	PUSH	AF
+	ADD	A,C
+	LD	C,A		; Checksum
+
+	LD	A,(RECTYP)
+	OR	A,A
+	JR	NZ,LHI20
+
+	POP	AF
+	LD	(IY),A		; for 20-bit address (BY:IY)
+	INC	IY
+	JR	LHI2
+LHI20:
+	POP	AF
+LHI2:
+	DJNZ	LHI1
+LHI3:
+	CALL	HEXIN
+	ADD	A,C
+	JR	NZ,LHIE		; Checksum error
+	LD	A,(RECTYP)
+	OR	A,A
+	JP	Z,LH3
+	JP	WSTART
+LHIE:
+	LD	HL,IHEMSG
+	CALL	STROUT
+	JP	WSTART
+	
+LHS0:
+	CALL	CONIN
+	LD	(RECTYP),A
+
+	CALL	HEXIN
+	LD	B,A		; Length+3
+	LD	C,A		; Checksum
+
+	CALL	HEXIN
+	LD	H,A
+	ADD	A,C
+	LD	C,A
+	
+	CALL	HEXIN
+	LD	L,A
+	ADD	A,C
+	LD	C,A
+
+	ADD	HL,DE
+
+	DEC	B
+	DEC	B
+	DEC	B
+	JR	Z,LHS3
+	LD	IY,HL
+LHS1:
+	CALL	HEXIN
+	PUSH	AF
+	ADD	A,C
+	LD	C,A		; Checksum
+
+	LD	A,(RECTYP)
+	CP	A,'1'
+	JR	NZ,LHS2
+
+	POP	AF
+	LD	(IY),A		; for 20-bit address (BY:IY)
+	INC	IY
+	JR	LHS20
+LHS2:
+	POP	AF
+LHS20:
+	DJNZ	LHS1
+LHS3:
+	CALL	HEXIN
+	ADD	A,C
+	CP	A,0FFH
+	JR	NZ,LHSE
+
+	LD	A,(RECTYP)
+	CP	A,'7'
+	JR	Z,LHSR
+	CP	A,'8'
+	JR	Z,LHSR
+	CP	A,'9'
+	JR	Z,LHSR
+	JP	LH3
+LHSE:
+	LD	HL,SHEMSG
+	CALL	STROUT
+LHSR:
+	JP	WSTART
+	
+;;;
+;;; SAVE HEX file
+;;;
+SAVEH:
+	INC	HL
+	LD	A,(HL)
+	CALL	UPPER
+	CP	A,'I'
+	JR	Z,SH0
+	CP	A,'S'
+	JR	NZ,SH1
+SH0:
+	INC	HL
+	LD	(HEXMOD),A
+SH1:
+	CALL	SKIPSP
+	CALL	RDADR
+	LD	A,C
+	OR	A,A
+	JR	Z,SHE
+	PUSH	DE
+	POP	IX		; IX = Start address
+	CALL	SKIPSP
+	LD	A,(HL)
+	CP	A,','
+	JR	NZ,SHE
+	INC	HL
+	CALL	SKIPSP
+	CALL	RDHEX		; DE = End address
+	LD	A,C
+	OR	A,A
+	JR	Z,SHE
+	CALL	SKIPSP
+	LD	A,(HL)
+	OR	A,A
+	JR	Z,SH2
+SHE:
+	JP	ERR
+
+SH2:
+	PUSH	IX
+	POP	HL
+	EX	DE,HL
+	INC	HL
+	OR	A,A
+	SBC	HL,DE		; HL = Length
+SH3:
+	CALL	SHL
+	LD	A,H
+	CP	A,L
+	JR	NZ,SH3
+
+	LD	A,(HEXMOD)
+	CP	A,'I'
+	JR	NZ,SH4
+	;; End record for Intel HEX
+	LD	HL,IHEXER
+	CALL	STROUT
+	JP	WSTART
+SH4:
+	;; End record for Motorola S record
+	LD	HL,SRECER
+	CALL	STROUT
+	JP	WSTART
+
+SHL:
+	LD	C,16
+	LD	A,H
+	OR	A,A
+	JR	NZ,SHL0
+	LD	A,L
+	CP	A,C
+	JR	NC,SHL0
+	LD	C,A
+SHL0:
+	LD	B,0
+	OR	A,A
+	SBC	HL,BC
+	LD	B,C
+
+	LD	A,(HEXMOD)
+	CP	A,'I'
+	JR	NZ,SHLS
+
+	;; Intel HEX
+	LD	A,':'
+	CALL	CONOUT
+
+	LD	A,B
+	CALL	HEXOUT2		; Length
+	LD	C,B		; Checksum
+
+	LD	A,D
+	CALL	HEXOUT2
+	LD	A,D
+	ADD	A,C
+	LD	C,A
+	
+	LD	A,E
+	CALL	HEXOUT2
+	LD	A,E
+	ADD	A,C
+	LD	C,A
+	
+	XOR	A,A
+	CALL	HEXOUT2
+	LD	IY,DE
+SHLI0:
+	LD	A,(IY)		; for 20-bit address (BY:IY)
+	PUSH	AF
+	CALL	HEXOUT2
+	POP	AF
+	ADD	A,C
+	LD	C,A
+
+	INC	IY
+	DJNZ	SHLI0
+
+	LD	DE,IY
+
+	LD	A,C
+	NEG	A
+	CALL	HEXOUT2
+	JP	CRLF
+
+SHLS:
+	;; Motorola S record
+	LD	A,'S'
+	CALL	CONOUT
+	LD	A,'1'
+	CALL	CONOUT
+
+	LD	A,B
+	ADD	A,2+1		; DataLength + 2(Addr) + 1(Sum)
+	LD	C,A
+	CALL	HEXOUT2
+
+	LD	A,D
+	CALL	HEXOUT2
+	LD	A,D
+	ADD	A,C
+	LD	C,A
+	
+	LD	A,E
+	CALL	HEXOUT2
+	LD	A,E
+	ADD	A,C
+	LD	C,A
+	LD	IY,DE
+SHLS0:
+	LD	A,(IY)		; for 20-bit address (BY:IY)
+	PUSH	AF
+	CALL	HEXOUT2		; Data
+	POP	AF
+	ADD	A,C
+	LD	C,A
+
+	INC	IY
+	DJNZ	SHLS0
+
+	LD	DE,IY
+
+	LD	A,C
+	CPL	A
+	CALL	HEXOUT2
+	JP	CRLF
+
+;;;
+;;; Port in
+;;; 
+PIN:
+	INC	HL
+	CALL	SKIPSP
+	CALL	RDADR
+	LD	A,C
+	OR	A,A
+	JP	Z,ERR		; Port no. missing
+	CALL	SKIPSP
+	LD	A,(HL)
+	OR	A,A
+	JP	NZ,ERR
+
+	LD	IY,DE
+	LD	A,(IY)
+	CALL	HEXOUT2
+	CALL	CRLF
+	JP	WSTART
+
+;;;
+;;; Port out
+;;;
+POUT:
+	INC	HL
+	CALL	SKIPSP
+	CALL	RDADR
+	LD	A,C
+	OR	A,A
+	JP	Z,ERR		; Port no. missing
+	LD	IY,DE
+	CALL	SKIPSP
+	LD	A,(HL)
+	CP	A,','
+	JP	NZ,ERR
+	INC	HL
+	CALL	SKIPSP
+	CALL	RDHEX
+	LD	A,C
+	OR	A,A
+	JP	Z,ERR		; Data missing
+	CALL	SKIPSP
+	LD	A,(HL)
+	OR	A,A
+	JP	NZ,ERR
+
+	LD	(IY),E
+	JP	WSTART
+
+;;;
+;;; Register
+;;;
+
+	IF USE_REGCMD
+
+REG:
+	INC	HL
+	CALL	SKIPSP
+	CALL	UPPER
+	OR	A,A
+	JR	NZ,RG0
+	CALL	RDUMP
+	JP	WSTART
+RG0:
+	EX	DE,HL
+	LD	HL,RNTAB
+RG1:
+	CP	A,(HL)
+	JR	Z,RG2		; Character match
+	LD	C,A
+	INC	HL
+	LD	A,(HL)
+	OR	A,A
+	JP	Z,RGE		; Found end mark
+	LD	A,C
+	LD	BC,5
+	ADD	HL,BC		; Next entry
+	JR	RG1
+RG2:
+	INC	HL
+	LD	A,(HL)
+	CP	A,0FH		; Link code
+	JR	NZ,RG3
+	;; Next table
+	INC	HL
+	LD	C,(HL)
+	INC	HL
+	LD	H,(HL)
+	LD	L,C
+	INC	DE
+	LD	A,(DE)
+	CALL	UPPER
+	JR	RG1
+RG3:
+	OR	A,A
+	JR	Z,RGE		; Found end mark
+
+	LD	C,(HL)		; LD C,A???
+	LD	A,C
+	OR	A,A
+	JR	P,RG30
+	LD	A,(PSPEC)
+	OR	A,A
+	JR	Z,RGE		; Reg. not allowed in 16-bit address
+RG30:	
+	INC	HL
+	LD	E,(HL)
+	INC	HL
+	LD	D,(HL)
+	PUSH	DE		; Reg storage address
+	INC	HL
+	LD	A,(HL)
+	INC	HL
+	LD	H,(HL)
+	LD	L,A		; HL: Reg name
+	CALL	STROUT
+	LD	A,'='
+	CALL	CONOUT
+
+	LD	A,C
+	AND	A,07H
+	CP	A,2
+	JR	Z,RG4
+	;; 8 bit register
+	POP	HL
+	LD	A,(HL)
+	PUSH	HL
+	CALL	HEXOUT2
+	JR	RG5
+RG4:
+	;; 16 bit register
+	POP	HL
+	PUSH	HL
+	INC	HL
+	LD	A,(HL)
+	CALL	HEXOUT2
+	DEC	HL
+	LD	A,(HL)
+	CALL	HEXOUT2
+RG5:
+	LD	A,' '
+	CALL	CONOUT
+	PUSH	BC		; C: reg size
+	CALL	GETLIN
+	LD	HL,INBUF
+	CALL	SKIPSP
+	CALL	RDHEX
+	LD	A,C
+	OR	A,A
+	JR	Z,RGR
+	POP	BC
+	POP	HL
+	LD	A,C
+	CP	A,1
+	JR	NZ,RG6
+	;; 8 bit register
+	LD	(HL),E
+	JR	RGR
+RG6:
+	CP	A,2
+	JR	NZ,RG7
+	;; 16 bit register
+	LD	(HL),E
+	INC	HL
+	LD	(HL),D
+	JR	RGR
+RG7:
+	;; 4 bit register
+	LD	A,E
+	AND	A,0FH
+	LD	(HL),A
+RGR:
+	JP	WSTART
+RGE:
+	JP	ERR
+
+RDUMP:
+	LD	HL,RDTAB
+RD0:
+	LD	A,4
+	LD	A,(HL+A)
+	OR	A,A
+	JR	P,RD00
+	LD	A,(PSPEC)
+	OR	A,A
+	JR	NZ,RD00
+	ADD	HL,5
+	JR	RD0
+RD00:	
+	LD	E,(HL)
+	INC	HL
+	LD	D,(HL)
+	INC	HL
+	LD	A,D
+	OR	A,E
+	JP	Z,CRLF		; End
+	EX	DE,HL
+	CALL	STROUT
+	EX	DE,HL
+
+	LD	E,(HL)
+	INC	HL
+	LD	D,(HL)
+	INC	HL
+	LD	A,(HL)
+	INC	HL
+	EX	DE,HL
+	AND	A,0FH
+	CP	A,1
+	JR	NZ,RD1
+	;; 1 byte
+	LD	A,(HL)
+	CALL	HEXOUT2
+	EX	DE,HL
+	JR	RD0
+RD1:
+	;; 2 byte
+	INC	HL
+	LD	A,(HL)
+	CALL	HEXOUT2		; High byte
+	DEC	HL
+	LD	A,(HL)
+	CALL	HEXOUT2		; Low byte
+RD2:	
+	EX	DE,HL
+	JR	RD0
+
+	ENDIF
+
+;;;
+;;; Other support routines
+;;;
+
+STROUT:
+	LD	A,(HL)
+	AND	A,A
+	RET	Z
+	CALL	CONOUT
+	INC	HL
+	JR	STROUT
+
+HEXOUT4:
+	LD	A,H
+	CALL	HEXOUT2
+	LD	A,L
+HEXOUT2:
+	PUSH	AF
+	RRA
+	RRA
+	RRA
+	RRA
+	CALL	HEXOUT1
+	POP	AF
+HEXOUT1:
+	AND	A,0FH
+	ADD	A,'0'
+	CP	A,'9'+1
+	JP	C,CONOUT
+	ADD	A,'A'-'9'-1
+	JP	CONOUT
+
+HEXIN:
+	XOR	A,A
+	CALL	HI0
+	RLCA
+	RLCA
+	RLCA
+	RLCA
+HI0:
+	PUSH	BC
+	LD	C,A
+	CALL	CONIN
+	CALL	UPPER
+	CP	A,'0'
+	JR	C,HIR
+	CP	A,'9'+1
+	JR	C,HI1
+	CP	A,'A'
+	JR	C,HIR
+	CP	A,'F'+1
+	JR	NC,HIR
+	SUB	A,'A'-'9'-1
+HI1:
+	SUB	A,'0'
+	OR	A,C
+HIR:
+	POP	BC
+	RET
+	
+CRLF:
+	LD	A,CR
+	CALL	CONOUT
+	LD	A,LF
+	JP	CONOUT
+
+GETLIN:
+	LD	HL,INBUF
+	LD	B,0
+GL0:
+	CALL	CONIN
+	CP	A,CR
+	JR	Z,GLE
+	CP	A,LF
+	JR	Z,GLE
+	CP	A,BS
+	JR	Z,GLB
+	CP	A,DEL
+	JR	Z,GLB
+	CP	A,' '
+	JR	C,GL0
+	CP	A,80H
+	JR	NC,GL0
+	LD	C,A
+	LD	A,B
+	CP	A,BUFLEN-1
+	JR	NC,GL0		; Too long
+	INC	B
+	LD	A,C
+	LD	(HL),A
+	CALL	CONOUT
+	INC	HL
+	JR	GL0
+GLB:
+	LD	A,B
+	AND	A,A
+	JR	Z,GL0
+	DEC	B
+	DEC	HL
+	LD	A,08H
+	CALL	CONOUT
+	LD	A,' '
+	CALL	CONOUT
+	LD	A,08H
+	CALL	CONOUT
+	JR	GL0
+GLE:
+	CALL	CRLF
+	LD	(HL),00H
+	RET
+
+SKIPSP:
+	LD	A,(HL)
+	CP	A,' '
+	RET	NZ
+	INC	HL
+	JR	SKIPSP
+
+UPPER:
+	CP	A,'a'
+	RET	C
+	CP	A,'z'+1
+	RET	NC
+	ADD	A,'A'-'a'
+	RET
+
+RDHEX:
+	LD	C,0
+	LD	DE,0
+RH0:
+	LD	A,(HL)
+	CALL	UPPER
+	CP	A,'0'
+	JR	C,RHE
+	CP	A,'9'+1
+	JR	C,RH1
+	CP	A,'A'
+	JR	C,RHE
+	CP	A,'F'+1
+	JR	NC,RHE
+	SUB	A,'A'-'9'-1
+RH1:
+	SUB	A,'0'
+	RLA
+	RLA
+	RLA
+	RLA
+	RLA
+	RL	E
+	RL	D
+	RLA
+	RL	E
+	RL	D
+	RLA
+	RL	E
+	RL	D
+	RLA
+	RL	E
+	RL	D
+	INC	HL
+	INC	C
+	JR	RH0
+RHE:
+	RET
+
+ADROUT:
+	LD	A,(PSPEC)
+	OR	A,A
+	JP	Z,HEXOUT4
+	LD	A,(CURBNK)
+	CALL	HEXOUT2
+	LD	A,':'
+	CALL	CONOUT
+	JP	HEXOUT4
+
+RDADR:
+	LD	A,(PSPEC)
+	OR	A,A
+	JP	Z,RDHEX
+	CALL	RDHEX
+	CP	A,':'
+	RET	NZ
+	LD	A,E
+	AND	A,0FH
+	LD	(CURBNK),A
+	LD	(BY),A
+	INC	HL
+	CALL	RDHEX
+	LD	A,C
+	OR	A,A
+	RET	NZ
+	DEC	HL
+	RET
+
+;;;
+;;; SWI Handler
+;;;
+
+SWIH:
+	IF USE_REGCMD
+
+	LD	(REGHL),HL
+	LD	(REGDE),DE
+	LD	(REGBC),BC
+	POP	HL		; AF (pushed by SWI)
+	LD	(REGAF),HL
+	EX	AF,AF'
+	PUSH	AF
+	EXX
+	LD	(REGHLX),HL
+	LD	(REGDEX),DE
+	LD	(REGBCX),BC
+	POP	HL
+	LD	(REGAFX),HL
+	LD	(REGIX),IX
+	LD	(REGIY),IY
+	POP	HL
+	DEC	HL
+	LD	(REGPC),HL
+	LD	(REGSP),SP
+	LD	A,(BX)
+	AND	A,0FH
+	LD	(REGBX),A
+	LD	A,(BY)
+	AND	A,0FH
+	LD	(REGBY),A
+
+	LD	HL,SWIMSG
+	CALL	STROUT
+	CALL	RDUMP
+
+	LD	(BX),00H
+	LD	(BY),00H
+
+	JP	WSTART
+
+	ELSE
+
+	RETI
+
+	ENDIF
+
+OPNMSG:
+	DB	CR,LF,"Universal Monitor TLCS-90",CR,LF,00H
+
+PROMPT:
+	DB	"] ",00H
+
+IHEMSG:
+	DB	"Error ihex",CR,LF,00H
+SHEMSG:
+	DB	"Error srec",CR,LF,00H
+ERRMSG:
+	DB	"Error",CR,LF,00H
+
+DSEP0:
+	DB	" :",00H
+DSEP1:
+	DB	" : ",00H
+IHEXER:
+        DB	":00000001FF",CR,LF,00H
+SRECER:
+        DB	"S9030000FC",CR,LF,00H
+
+	IF USE_IDENT
+
+IMUK:	DB	"Unknown",CR,LF,00H
+IM16:	DB	"Addr16",CR,LF,00H
+IM20:	DB	"Addr20",CR,LF,00H
+
+	ENDIF
+
+	IF USE_REGCMD
+
+SWIMSG:
+	DB	"SWI",CR,LF,00H
+
+	;; Register dump table
+RDTAB:	DW	RDSA,   REGAF+1
+	DB	1
+	DW	RDSBC,  REGBC
+	DB	2
+	DW	RDSDE,  REGDE
+	DB	2
+	DW	RDSHL,  REGHL
+	DB	2
+	DW	RDSF,   REGAF
+	DB	1
+
+	DW	RDSBX,  REGBX
+	DB	81H
+	DW	RDSIX,  REGIX
+	DB	2
+	DW	RDSBY,  REGBY
+	DB	81H
+	DW	RDSIY,  REGIY
+	DB	2
+
+	DW	RDSAX,  REGAFX+1
+	DB	1
+	DW	RDSBCX, REGBCX
+	DB	2
+	DW	RDSDEX, REGDEX
+	DB	2
+	DW	RDSHLX, REGHLX
+	DB	2
+	DW	RDSFX,  REGAFX
+	DB	1
+
+	DW	RDSSP,  REGSP
+	DB	2
+	DW	RDSPC,  REGPC
+	DB	2
+
+	DW	0000H,  0000H
+	DB	0
+
+RDSA:	DB	"A =",00H
+RDSBC:	DB	" BC =",00H
+RDSDE:	DB	" DE =",00H
+RDSHL:	DB	" HL =",00H
+RDSF:	DB	" F =",00H
+RDSBX:	DB	" BX=",00H
+RDSIX:	DB	" IX=",00H
+RDSBY:	DB	" BY=",00H
+RDSIY:	DB	" IY=",00H
+RDSAX:	DB	CR,LF,"A'=",00H
+RDSBCX:	DB	" BC'=",00H
+RDSDEX:	DB	" DE'=",00H
+RDSHLX:	DB	" HL'=",00H
+RDSFX:	DB	" F'=",00H
+RDSSP:	DB	" SP=",00H
+RDSPC:	DB	" PC=",00H
+
+RNTAB:
+	DB	'A',0FH		; "A?"
+	DW	RNTABA,0
+	DB	'B',0FH		; "B?"
+	DW	RNTABB,0
+	DB	'C',0FH		; "C?"
+	DW	RNTABC,0
+	DB	'D',0FH		; "D?"
+	DW	RNTABD,0
+	DB	'E',0FH		; "E?"
+	DW	RNTABE,0
+	DB	'F',0FH		; "F?"
+	DW	RNTABF,0
+	DB	'H',0FH		; "H?"
+	DW	RNTABH,0
+	DB	'I',0FH		; "I?"
+	DW	RNTABI,0
+	DB	'L',0FH		; "L?"
+	DW	RNTABL,0
+	DB	'P',0FH		; "P?"
+	DW	RNTABP,0
+	DB	'S',0FH		; "S?"
+	DW	RNTABS,0
+
+	DB	00H,0		; End mark
+
+RNTABA:
+	DB	00H,1		; "A"
+	DW	REGAF+1,RNA
+	DB	'\'',1		; "A'"
+	DW	REGAFX+1,RNAX
+
+	DB	00H,0
+	
+RNTABB:
+	DB	00H,1		; "B"
+	DW	REGBC+1,RNB
+	DB	'\'',1		; "B'"
+	DW	REGBCX+1,RNBX
+	DB	'C',0FH		; "BC?"
+	DW	RNTABBC,0
+	DB	'X',83H		; "BX"
+	DW	REGBX,RNBX2
+	DB	'Y',83H		; "BY"
+	DW	REGBY,RNBY
+
+	DB	00H,0		; End mark
+
+RNTABBC:
+	DB	00H,2		; "BC"
+	DW	REGBC,RNBC
+	DB	'\'',2		; "BC'"
+	DW	REGBCX,RNBCX
+
+	DB	00H,0
+	
+RNTABC:
+	DB	00H,1		; "C"
+	DW	REGBC,RNC
+	DB	'\'',1		; "C'"
+	DW	REGBCX,RNCX
+
+	DB	00H,0
+	
+RNTABD:
+	DB	00H,1		; "D"
+	DW	REGDE+1,RND
+	DB	'\'',1		; "D'"
+	DW	REGDEX+1,RNDX
+	DB	'E',0FH		; "DE?"
+	DW	RNTABDE,0
+
+	DB	00H,0
+
+RNTABDE:
+	DB	00H,2		; "DE"
+	DW	REGDE,RNDE
+	DB	'\'',2		; "DE'"
+	DW	REGDEX,RNDEX
+
+	DB	00H,0
+	
+RNTABE:
+	DB	00H,1		; "E"
+	DW	REGDE,RNE
+	DB	'\'',1		; "E'"
+	DW	REGDEX,RNEX
+
+	DB	00H,0
+	
+RNTABF:
+	DB	00H,1		; "F"
+	DW	REGAF,RNF
+	DB	'\'',1		; "F'"
+	DW	REGAFX,RNFX
+
+	DB	00H,0
+	
+RNTABH:
+	DB	00H,1		; "H"
+	DW	REGHL+1,RNH
+	DB	'\'',1		; "H'"
+	DW	REGHLX+1,RNHX
+	DB	'L',0FH		; "HL?"
+	DW	RNTABHL,0
+
+	DB	00H,0
+
+RNTABHL:
+	DB	00H,2		; "HL"
+	DW	REGHL,RNHL
+	DB	'\'',2		; "HL'"
+	DW	REGHLX,RNHLX
+
+	DB	00H,0
+	
+RNTABL:
+	DB	00H,1		; "L"
+	DW	REGHL,RNL
+	DB	'\'',1		; "L'"
+	DW	REGHLX,RNLX
+
+	DB	00H,0
+	
+RNTABI:
+	DB	'X',2		; "IX"
+	DW	REGIX,RNIX
+	DB	'Y',2		; "IY"
+	DW	REGIY,RNIY
+	
+	DB	00H,0
+
+RNTABP:
+	DB	'C',2		; "PC"
+	DW	REGPC,RNPC
+
+	DB	00H,0
+
+RNTABS:
+	DB	'P',2		; "SP"
+	DW	REGSP,RNSP
+
+	DB	00H,0
+
+RNA:	DB	"A",00H
+RNBC:	DB	"BC",00H
+RNB:	DB	"B",00H
+RNC:	DB	"C",00H
+RNDE:	DB	"DE",00H
+RND:	DB	"D",00H
+RNE:	DB	"E",00H
+RNHL:	DB	"HL",00H
+RNH:	DB	"H",00H
+RNL:	DB	"L",00H
+RNF:	DB	"F",00H
+RNAX:	DB	"A'",00H
+RNBCX:	DB	"BC'",00H
+RNBX:	DB	"B'",00H
+RNCX:	DB	"C'",00H
+RNDEX:	DB	"DE'",00H
+RNDX:	DB	"D'",00H
+RNEX:	DB	"E'",00H
+RNHLX:	DB	"HL'",00H
+RNHX:	DB	"H'",00H
+RNLX:	DB	"L'",00H
+RNFX:	DB	"F'",00H
+RNIX:	DB	"IX",00H
+RNIY:	DB	"IY",00H
+RNSP:	DB	"SP",00H
+RNPC:	DB	"PC",00H
+RNBX2:	DB	"BX",00H	; RNBX already used for B'
+RNBY:	DB	"BY",00H
+
+	ENDIF
+
+
+	IF USE_DEV_TLCS90
+	INCLUDE	"dev/dev_tlcs90.asm"
+	ENDIF
+
+	IF USE_DEV_EMILY
+	INCLUDE	"dev/dev_emily.asm"
+	ENDIF
+	    
+;;;
+;;; RAM area
+;;;
+
+	;;
+	;; Work Area
+	;;
+	
+	ORG	WORK_B
+
+INBUF:	DS	BUFLEN		; Line input buffer
+CURBNK:	DS	1		; Current bank
+DSADDR:	DS	2		; Dump start address
+DEADDR:	DS	2		; Dump end address
+DSTATE:	DS	1		; Dump state
+GADDR:	DS	2		; Go address
+SADDR:	DS	2		; Set address
+HEXMOD:	DS	1		; HEX file mode
+RECTYP:	DS	1		; Record type
+PSPEC:	DS	1		; Processor spec.
+
+	IF USE_REGCMD
+
+REG_B:	
+REGAF:	DS	2
+REGBC:	DS	2
+REGDE:	DS	2
+REGHL:	DS	2
+REGAFX:	DS	2		; Register AF'
+REGBCX:	DS	2		; Register BC'
+REGDEX:	DS	2		; Register DE'
+REGHLX:	DS	2		; Register HL'
+REGIX:	DS	2
+REGIY:	DS	2
+REGSP:	DS	2
+REGPC:	DS	2
+REGBX:	DS	1
+REGBY:	DS	1
+REG_E:
+	ENDIF
+
+	END

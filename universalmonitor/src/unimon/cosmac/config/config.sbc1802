@@ -1,0 +1,55 @@
+;;; -*- asm -*-
+;;;
+;;; Universal Monitor COSMAC config file (for SBC1802)
+;;;
+
+
+;;;
+;;; CPU
+;;;
+
+
+;;;
+;;; Memory
+;;;
+
+RAM_B:	EQU	08000H
+WORK_B:	EQU	0FF00H		; Work area must fit in single 256 byte page
+STACK:	EQU	0FFEFH
+
+BUFLEN:	EQU	16
+
+;;;
+;;; Options
+;;;
+
+
+;;;
+;;; EMILY Board (Shared Memory)
+;;;
+
+USE_DEV_EMILY = 0
+	IF USE_DEV_EMILY
+	;;
+SMBASE:	EQU	0FF0H
+	ENDIF
+
+;;;
+;;; Software UART
+;;;
+
+USE_DEV_SOFT = 1
+	IF USE_DEV_SOFT
+	;;
+	ENDIF
+
+;;;
+;;; Intel 8251
+;;;
+
+
+USE_DEV_8251 = 0
+	IF USE_DEV_8251
+USARTD:	EQU	2
+USARTC:	EQU	3
+	ENDIF

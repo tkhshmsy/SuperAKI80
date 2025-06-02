@@ -1,0 +1,1032 @@
+;;; 
+;;; Universal Monitor for Fairchild F8
+;;;   Copyright (C) 2019,2020 Haruo Asano
+;;;
+
+	CPU	F3850
+
+TARGET:	equ	"F3850+F3853"
+
+
+	INCLUDE	"config.inc"
+	INCLUDE	"regf8.inc"
+	
+	INCLUDE	"../common.inc"
+
+	
+;;; 
+;;; ROM area
+;;;
+
+	ORG	0000H
+	DI
+	JMP	CSTART
+
+	;;
+	;;
+	;;
+
+	ORG	0100H
+CSTART:
+	PI	INIT
+
+	LI	DSADDR
+	LR	IS,A
+	LI	80H
+	LR	0DH,A
+	CLR
+	LR	0DH,A
+
+	LISL	SADDR-DSADDR
+	LI	80H
+	LR	0DH,A
+	CLR
+	LR	0DH,A
+
+	LI	80H
+	LR	0DH,A
+	CLR
+	LR	0DH,A
+	
+	;;
+
+	DCI	OPNMSG
+	PI	STROUT
+
+WSTART:
+	DCI	PROMPT
+	PI	STROUT
+	PI	GETLIN
+	LI	INBUF
+	LR	2,A
+	PI	SKIPSP
+	PI	UPPER
+	CLR
+	AS	0
+	BZ	WSTART
+	CI	'D'
+	BNZ	M00
+	JMP	DUMP
+M00:
+	CI	'G'
+	BNZ	M01
+	JMP	GO
+M01:
+	CI	'S'
+	BNZ	M02
+	JMP	SETM
+
+M02:
+	CI	'L'
+	BNZ	M03
+	JMP	LOADH
+M03:
+;; 	CI	'P'
+;; 	BNZ	M04
+;; 	JMP	SAVEH
+
+;; M04:
+	CI	'I'
+	BNZ	M05
+	JMP	PIN
+M05:
+	CI	'O'
+	BNZ	M06
+	JMP	POUT
+M06:	
+ERR:
+	DCI	ERRMSG
+	PI	STROUT
+	BR	WSTART
+
+;;;
+;;; Dump memory
+;;;
+
+DUMP:
+	LR	A,2
+	INC
+	LR	2,A
+	PI	SKIPSP
+	PI	RDHEX
+	LR	A,3
+	CI	0
+	BNZ	DP0
+	;; No arg.
+	PI	SKIPSP
+	LR	A,0
+	CI	0
+	BNZ	ERR
+	LI	DSADDR+1
+	LR	IS,A
+	LR	A,0EH		; DSADDR(L)
+	LR	7,A		; DSADDR(L) (tmp)
+	AI	128
+	LR	9,A		; DEADDR(L)
+	LR	A,0CH		; DSADDR(U)
+	LR	6,A		; DSADDR(U) (tmp)
+	LNK
+	LR	8,A		; DEADDR(U)
+	BR	DPM
+	;; 1st arg. found
+DP0:
+	LR	A,5
+	LR	7,A		; DSADDR(L)
+	LR	A,4
+	LR	6,A		; DSADDR(U)
+	PI	SKIPSP
+	LR	A,0
+	CI	','
+	BZ	DP1
+	OI	0
+	BNZ	ERR
+	;; No 2nd arg.
+	LR	A,7
+	AI	128
+	LR	9,A
+	LR	A,6
+	LNK
+	LR	8,A
+	BR	DPM
+	;; 
+DP1:
+	LR	A,2
+	INC
+	LR	2,A
+	PI	SKIPSP
+	PI	RDHEX
+	PI	SKIPSP
+	LR	A,3
+	CI	0
+	BZ	ERR
+	LR	A,0
+	CI	0
+	BNZ	ERR
+	LR	A,5
+	INC
+	LR	9,A
+	LR	A,4
+	LNK
+	LR	8,A
+	;; DUMP main
+DPM:
+	LR	A,7		; DSADDR(L)
+	NI	0F0H
+	LR	HL,A		; DMPPT(L)
+	LR	A,6		; DSADDR(U)
+	LR	HU,A		; DMPPT(U)
+	CLR
+	LR	3,A		; DSTATE
+DPM0:
+	JMP	DPL		; CALL
+DPM0B:
+	PI	CONST
+	LR	A,0
+	OI	0
+	BNZ	DPM1
+	LR	A,3		; DSTATE
+	CI	1
+	BC	DPM0
+	LI	DSADDR+1
+	LR	IS,A
+	LR	A,9		; DEADDR(L)
+	LR	0EH,A		; DSADDR(L)
+	LR	A,8		; DEADDR(U)
+	LR	0CH,A		; DSADDR(U)
+	JMP	WSTART
+DPM1:	
+	LI	DSADDR+1
+	LR	IS,A
+	LR	A,HL		; DMPPT(L)
+	LR	0EH,A		; DSADDR(L)
+	LR	A,HU		; DMPPT(U)
+	LR	0CH,A		; DSADDR(U)
+	JMP	WSTART
+
+	;; Dump line
+DPL:
+	LR	A,HU
+	LR	0,A
+	PI	HEXOUT2
+	LR	A,HL
+	LR	0,A
+	PI	HEXOUT2
+	DCI	DSEP0
+	PI	STROUT
+	LI	INBUF
+	LR	IS,A
+	LI	16
+	LR	2,A		; count=16
+DPL0:
+	PI	DPB
+DPL0B:
+	DS	2
+	BNZ	DPL0
+
+	DCI	DSEP1
+	PI	STROUT
+
+	;; Print ASCII area
+	LI	INBUF
+	LR	IS,A
+	LI	16
+	LR	2,A		; count=16
+DPL1:
+	LR	A,0CH
+	CI	' '-1
+	BC	DPL2
+	CI	7FH
+	BNC	DPL2
+	BR	DPL3
+DPL2:
+	LI	'.'
+DPL3:
+	LR	0,A
+	PI	CONOUT
+
+	LR	A,IS		; INC ISAR
+	INC
+	LR	IS,A
+	
+	DS	2
+	BNZ	DPL1
+	PI	CRLF
+	BR	DPM0B		; Return
+
+	;; Dump byte
+DPB:
+	LI	' '
+	LR	0,A
+	PI	CONOUT
+	LR	A,3		; DSTATE
+	CI	0
+	BNZ	DPB2
+	;; Dump state 0
+	LR	A,6		; DSADDR(U) (tmp)
+	XS	10		; Compare HU
+	BNZ	DPB0
+	LR	A,7		; DSADDR(L) (tmp)
+	XS	11		; Compare HL
+	BZ	DPB1
+	;; Still 0 or 2
+DPB0:
+	LI	' '
+	LR	0CH,A
+	LR	0,A
+	PI	CONOUT
+	PI	CONOUT
+	LR	A,IS		; INC ISAR
+	INC
+	LR	IS,A
+	LR	A,HL
+	INC
+	LR	HL,A
+	LR	A,HU
+	LNK
+	LR	HU,A
+	BR	DPL0B		; Return
+	;; Found start address
+DPB1:
+	LI	1
+	LR	3,A		; DSTATE
+DPB2:
+	LR	A,3		; DSTATE
+	CI	1
+	BNZ	DPB0
+	;; Dump state 1
+	LR	DC,H
+	LM
+	LR	H,DC
+	LR	0CH,A
+	LR	0,A
+	PI	HEXOUT2
+
+	LR	A,IS		; INC ISAR
+	INC
+	LR	IS,A
+
+	LR	A,8		; DEADDR(U)
+	XS	10		; Compare HU
+	BNZ	DPBE
+	LR	A,9		; DEADDR(L)
+	XS	11		; Compare HL
+	BNZ	DPBE
+	LI	2
+	LR	3,A
+DPBE:
+	BR	DPL0B		; Return
+
+;;;
+;;; Go address
+;;;
+
+GO:
+	LR	A,2
+	INC
+	LR	2,A
+	PI	SKIPSP
+	PI	RDHEX
+	LR	A,0
+	CI	0
+	BZ	GO0
+	JMP	ERR
+GO0:
+	LI	GADDR
+	LR	IS,A
+	LR	A,0DH		; GADDR(U)
+	LR	QU,A
+	LR	A,0CH		; GADDR(L)
+	LR	QL,A
+	LR	A,3
+	CI	0
+	BZ	G0
+	LI	GADDR
+	LR	IS,A
+	LR	A,4		; RHVAL(U)
+	LR	QU,A
+	LR	0DH,A		; GADDR(U)
+	LR	A,5		; RHVAL(L)
+	LR	QL,A
+	LR	0CH,A		; GADDR(L)
+G0:
+	LR	P0,Q
+
+;;;
+;;; Set memory
+;;;
+
+SETM:
+	LR	A,2
+	INC
+	LR	2,A
+	PI	SKIPSP
+	PI	RDHEX
+	PI	SKIPSP
+	LI	SADDR
+	LR	IS,A
+	LR	A,0DH		; SADDR(U)
+	LR	10,A		; HU
+	LR	A,0CH		; SADDR(L)
+	LR	11,A		; HL
+	LR	A,0
+	CI	0
+	BNZ	SMER
+	LR	A,3
+	CI	0
+	BZ	SM1
+	LR	A,4
+	LR	10,A		; HU
+	LR	A,5
+	LR	11,A		; HL
+SM1:
+	LR	A,10
+	LR	0,A
+	PI	HEXOUT2
+	LR	A,11
+	LR	0,A
+	PI	HEXOUT2
+	DCI	DSEP1
+	PI	STROUT
+	LR	DC,H
+	LM
+	LR	0,A
+	PI	HEXOUT2
+	LI	' '
+	LR	0,A
+	PI	CONOUT
+	PI	GETLIN
+	LI	INBUF
+	LR	2,A
+	PI	SKIPSP
+	LR	A,0
+	CI	00H
+	BNZ	SM2
+	;; Empty (Increment address)
+	LR	A,11
+	INC
+	LR	11,A
+	LR	A,10
+	LNK
+	LR	10,A
+	BR	SM1
+SM2:
+	CI	'-'
+	BNZ	SM3
+	;; '-' (Decrement address)
+	LR	A,11
+	AI	0FFH
+	LR	11,A
+	LR	A,10
+	LNK
+	AI	0FFH
+	LR	10,A
+	BR	SM1
+SM3:
+	CI	'.'
+	BNZ	SM4
+	;; '.' (Quit)
+	LI	SADDR
+	LR	IS,A
+	LR	A,10
+	LR	0DH,A		; SADDR(U)
+	LR	A,11
+	LR	0CH,A		; SADDR(L)
+	JMP	WSTART
+SM4:
+	PI	RDHEX
+	LR	A,3
+	CI	0
+	BZ	SMER
+	LR	DC,H
+	LR	A,5
+	ST
+	LR	H,DC
+	BR	SM1
+SMER:
+	LI	SADDR
+	LR	IS,A
+	LR	A,10
+	LR	0DH,A		; SADDR(U)
+	LR	A,11
+	LR	0CH,A		; SADDR(L)
+	JMP	ERR
+
+;;;
+;;; Load HEX file
+;;;
+
+LOADH:
+	LR	A,2
+	INC
+	LR	2,A
+	PI	SKIPSP
+	PI	RDHEX
+	PI	SKIPSP
+	LR	A,0
+	CI	0
+	BZ	LH0
+	JMP	ERR
+LH0:
+	PI	CONIN
+	PI	UPPER
+	LR	A,0
+	CI	'S'
+	BZ	LHS0
+LH1:
+	CI	':'
+	BZ	LHI0
+LH2:
+	;; Skip to EOL
+	CI	CR
+	BZ	LH0
+	CI	LF
+	BZ	LH0
+LH3:
+	PI	CONIN
+	BR	LH2
+
+LHI0:
+	PI	HEXIN
+	LR	A,0
+	LR	2,A		; length
+	LR	3,A
+
+	PI	HEXIN
+	LR	A,0
+	LR	HU,A		; Address H
+	AS	3
+	LR	3,A
+
+	PI	HEXIN
+	LR	A,0
+	LR	HL,A		; Address L
+	AS	3
+	LR	3,A
+
+	;; Add offset
+	LR	A,HL
+	AS	5
+	LR	HL,A
+	LR	A,HU
+	LNK
+	AS	4
+	LR	HU,A
+	LR	DC,H
+
+	PI	HEXIN
+	LR	A,0
+	LR	6,A		; RECTYP
+	AS	3
+	LR	3,A
+
+	LR	A,2
+	CI	0
+	BZ	LHI3
+LHI1:
+	PI	HEXIN
+	LR	A,0
+	AS	3
+	LR	3,A
+
+	LR	A,6		; RECTYP
+	CI	0
+	BNZ	LHI2
+
+	LR	A,0
+	ST
+LHI2:
+	DS	2		; count
+	BNZ	LHI1
+LHI3:	
+	PI	HEXIN
+	LR	A,0
+	AS	3
+	BNZ	LHIE		; Checksum error
+	LR	A,6		; RECTYP
+	CI	0
+	BZ	LH3
+	JMP	WSTART
+LHIE:
+	DCI	IHEMSG
+	PI	STROUT
+	JMP	WSTART
+
+LHS0:
+	PI	CONIN
+	LR	A,0
+	LR	6,A		; RECTYP
+
+	PI	HEXIN
+	LR	A,0
+	LR	2,A		; Length+3
+	LR	3,A		; checksum
+
+	PI	HEXIN
+	LR	A,0
+	LR	HU,A		; Address H
+	AS	3
+	LR	3,A
+
+	PI	HEXIN
+	LR	A,0
+	LR	HL,A		; Addreess L
+	AS	3
+	LR	3,A
+
+	;; Add offset
+	LR	A,HL
+	AS	5
+	LR	HL,A
+	LR	A,HU
+	LNK
+	AS	4
+	LR	HU,A
+	LR	DC,H
+
+	LR	A,2
+	AI	-3
+	LR	2,A
+	BZ	LHS3
+LHS1:
+	PI	HEXIN
+	LR	A,0
+	AS	3
+	LR	3,A
+
+	LR	A,6
+	CI	'1'
+	BNZ	LHS2
+
+	LR	A,0
+	ST
+LHS2:
+	DS	2
+	BNZ	LHS1
+LHS3:
+	PI	HEXIN
+	LR	A,0
+	AS	3
+	CI	0FFH
+	BNZ	LHSE		; Checksum error
+
+	LR	A,6
+	CI	'9'
+	BZ	LHSR
+	JMP	LH3
+LHSE:
+	DCI	SHEMSG
+	PI	STROUT
+LHSR:
+	JMP	WSTART
+
+;;;
+;;; Port in
+;;;
+
+PIN:
+	CLR
+	LR	7,A
+	LR	A,2
+	INC
+	LR	2,A
+	LR	IS,A
+	LR	A,0CH
+	LR	0,A
+	PI	UPPER
+	LR	A,0
+	CI	'S'
+	BNZ	PI0
+	LR	7,A
+	LR	A,2
+	INC
+	LR	2,A
+PI0:	
+	PI	SKIPSP
+	PI	RDHEX
+	LR	A,3
+	CI	0
+	BZ	PIE		; Port addr. missing
+	PI	SKIPSP
+	LR	A,0
+	CI	0
+	BNZ	PIE
+
+	CLR
+	AS	4
+	BNZ	PIE		; Port addr. too large
+
+	DCI	XRAM_B
+
+	LR	A,7
+	CI	'S'
+	BZ	PIS
+
+	;; IN
+	LI	26H		; 'IN PP'
+	ST
+	LR	A,5
+	ST
+PI1:	
+	LI	50H		; 'LR 0,A'
+	ST
+	LI	1CH		; 'POP'
+	ST
+	PI	XRAM_B
+	PI	HEXOUT2
+	PI	CRLF
+	JMP	WSTART
+	;; INS
+PIS:
+	LR	A,5
+	NI	0F0H
+	BNZ	PIE		; Port addr. too large
+	LR	A,5
+	NI	0FH
+	AI	0A0H		; 'INS p'
+	ST
+	BR	PI1
+PIE:
+	JMP	ERR
+	
+;;;
+;;; Port out
+;;;
+
+POUT:
+	CLR
+	LR	7,A
+	LR	A,2
+	INC
+	LR	2,A
+	LR	IS,A
+	LR	A,0CH
+	LR	0,A
+	PI	UPPER
+	LR	A,0
+	CI	'S'
+	BNZ	PO0
+	LR	7,A
+	LR	A,2
+	INC
+	LR	2,A
+PO0:	
+	PI	SKIPSP
+	PI	RDHEX
+	CLR
+	AS	3
+	BZ	PIE		; Port addr. missing
+
+	CLR
+	AS	4
+	BNZ	PIE		; Port addr. too large
+
+	LR	A,5
+	LR	6,A		; Port address
+	PI	SKIPSP
+	LR	A,0
+	CI	','
+	BNZ	PIE
+	LR	A,2
+	INC
+	LR	2,A
+	PI	SKIPSP
+	PI	RDHEX
+	CLR
+	AS	3
+	BZ	PIE		; Data missing
+	PI	SKIPSP
+	CLR
+	AS	0
+	BNZ	PIE
+
+	DCI	XRAM_B
+	LI	45H		; 'LR A,5' (data)
+	ST
+
+	LR	A,7
+	CI	'S'
+	BZ	POS
+
+	;; OUT
+	LI	27H		; 'OUT PP'
+	ST
+	LR	A,6		; (address)
+	ST
+PO1:	
+	LI	1CH		; 'POP'
+	ST
+	PI	XRAM_B
+	JMP	WSTART
+	;; OUTS
+POS:
+	LR	A,6
+	NI	0F0H
+	BNZ	PIE		; Port addr. too large
+	LR	A,6
+	NI	0FH
+	AI	0B0H		; 'OUTS p'
+	ST
+	BR	PO1
+
+;;;
+;;; Other support routines
+;;;
+
+STROUT:
+	LR	K,P
+SO0:	
+	LM
+	OI	0
+	BZ	SOR
+	LR	0,A
+	PI	CONOUT
+	BR	SO0
+SOR:
+	LR	P,K
+	POP
+
+HEXOUT2:
+	LR	K,P
+
+	LR	A,0
+	LR	1,A
+	SR	4
+	AI	'0'
+	CI	'9'
+	BC	HO0
+	AI	'A'-'9'-1
+HO0:
+	LR	0,A
+	PI	CONOUT
+	LR	A,1
+	NI	0FH
+	AI	'0'
+	CI	'9'
+	BC	HO1
+	AI	'A'-'9'-1
+HO1:
+	LR	0,A
+	LR	P,K
+	JMP	CONOUT
+
+HEXIN:
+	LR	K,P
+	
+	PI	CONIN
+	PI	UPPER
+	PI	HI0
+	LR	A,0
+	SL	4
+	LR	1,A
+	PI	CONIN
+	PI	UPPER
+	PI	HI0
+	LR	A,0
+	AS	1
+	LR	0,A
+
+	LR	P,K
+	POP
+HI0:
+	LR	A,0
+	CI	'0'-1
+	BC	HIR
+	CI	'9'
+	BC	HI1
+	CI	'A'-1
+	BC	HIR
+	CI	'F'
+	BNC	HIR
+	AI	'9'-'A'+1
+HI1:
+	AI	-'0'
+HIR:
+	LR	0,A
+	POP
+
+CRLF:
+	LR	K,P
+	
+	LI	CR
+	LR	0,A
+	PI	CONOUT
+
+	LR	P,K
+
+	LI	LF
+	LR	0,A
+	JMP	CONOUT
+
+GETLIN:
+	LR	K,P
+	LI	INBUF
+	LR	2,A		; pointer
+	CLR
+	LR	3,A		; count
+GL0:
+	PI	CONIN
+	CI	CR
+	BZ	GLE
+	CI	LF
+	BZ	GLE
+	CI	BS
+	BZ	GLB
+	CI	DEL
+	BZ	GLB
+	CI	' '-1
+	BC	GL0
+	CI	7FH
+	BNC	GL0
+	LR	0,A
+	LR	A,3
+	CI	BUFLEN-1
+	BNC	GL0		; Too long
+	INC
+	LR	3,A
+	PI	CONOUT
+	LR	A,2
+	LR	IS,A
+	LR	A,0
+	LR	0CH,A
+	LR	A,IS
+	INC
+	LR	2,A
+	BR	GL0
+GLB:
+	LR	A,3
+	OI	0
+	BZ	GL0
+	DS	2
+	DS	3
+	LI	BS
+	LR	0,A
+	PI	CONOUT
+	LI	' '
+	LR	0,A
+	PI	CONOUT
+	LI	BS
+	LR	0,A
+	PI	CONOUT
+	BR	GL0
+GLE:
+	LR	A,2
+	LR	IS,A
+	CLR
+	LR	0CH,A
+	LR	P,K
+	JMP	CRLF
+
+SKIPSP:
+	LR	A,2
+	LR	IS,A
+	LR	A,0CH
+	LR	0,A
+	CI	' '
+	BNZ	SSR
+	LR	A,IS
+	INC
+	LR	2,A
+	BR	SKIPSP
+SSR:
+	POP
+
+UPPER:
+	LR	A,0
+	CI	'a'-1
+	BC	UPR
+	CI	'z'
+	BNC	UPR
+	AI	'A'-'a'
+	LR	0,A
+UPR:
+	POP
+
+RDHEX:
+	LR	K,P
+	CLR
+	LR	3,A		; count
+	LR	4,A		; RHVAL(U)
+	LR	5,A		; RHVAL(L)
+RH0:
+	LR	A,2
+	LR	IS,A
+	LR	A,0CH
+	LR	0,A
+	PI	UPPER
+	LR	A,0
+	CI	'0'-1
+	BC	RHE
+	CI	'9'
+	BC	RH1
+	CI	'A'-1
+	BC	RHE
+	CI	'F'
+	BNC	RHE
+	AI	-('A'-'9'-1)
+RH1:
+	AI	-'0'
+	LR	0,A
+	LR	A,4
+	SL	4
+	LR	4,A
+	LR	A,5
+	SR	4
+	AS	4
+	LR	4,A
+	LR	A,5
+	SL	4
+	AS	0
+	LR	5,A
+	LR	A,2
+	INC
+	LR	2,A
+	LR	A,3
+	INC
+	LR	3,A
+	BR	RH0
+RHE:
+	LR	P,K
+	POP
+
+OPNMSG:
+	DB	CR,LF,"Universal Monitor F8",CR,LF,00H
+
+PROMPT:
+	DB	"] ",00H
+
+IHEMSG:
+	DB	"Error ihex",CR,LF,00H
+
+SHEMSG:
+	DB	"Error srec",CR,LF,00H
+
+ERRMSG:
+	DB	"Error",CR,LF,00H
+
+DSEP0:
+	DB	" :",00H
+DSEP1:
+	DB	" : ",00H
+	
+	IF USE_DEV_8251
+	INCLUDE	"dev/dev_8251.asm"
+	ENDIF
+
+	IF USE_DEV_8251P
+	INCLUDE	"dev/dev_8251p.asm"
+	ENDIF
+
+	;;
+	;; Work Area
+	;;
+
+	SEGMENT	DATA
+	ORG	WORK_B
+
+INBUF:	DB	BUFLEN DUP (?)	; Line input buffer
+DSADDR:	DB	2 DUP (?)	; Dump start address
+SADDR:	DB	2 DUP (?)	; Set address
+GADDR:	DB	2 DUP (?)	; Go address
+HEXMOD:	DB	1 DUP (?)	; HEX file mode
+
+	END

@@ -1,0 +1,1417 @@
+;;;
+;;; Universal Monitor H8/500
+;;;   Copyright (C) 2023  Haruo Asano
+;;;
+
+	INCLUDE	"config.inc"
+
+	INCLUDE	"../common.inc"
+
+	IF USE_MAXIMUM
+	MAXMODE	ON
+	ELSE
+	MAXMODE	OFF
+	ENDIF
+
+;;;
+;;; ROM area
+;;;
+
+	;;  Vector Area
+	ORG	ROM_B
+
+	IF USE_MAXIMUM
+
+	;; Maximum Mode
+	DC.L	CSTART
+	DC.L	DUMMY_H
+	DC.L	INVINS_H
+	DC.L	ZERDIV_H
+
+	DC.L	TRAPVS_H
+	DC.L	DUMMY_H
+	DC.L	DUMMY_H
+	DC.L	DUMMY_H
+
+	DC.L	ADDERR_H
+	DC.L	TRACE_H
+	DC.L	DUMMY_H
+	DC.L	NMI_H
+
+	DC.L	DUMMY_H
+	DC.L	DUMMY_H
+	DC.L	DUMMY_H
+	DC.L	DUMMY_H
+
+	DC.L	TRAPA_H
+	DC.L	TRAPA_H
+	DC.L	TRAPA_H
+	DC.L	TRAPA_H
+
+	DC.L	TRAPA_H
+	DC.L	TRAPA_H
+	DC.L	TRAPA_H
+	DC.L	TRAPA_H
+
+	DC.L	TRAPA_H
+	DC.L	TRAPA_H
+	DC.L	TRAPA_H
+	DC.L	TRAPA_H
+
+	DC.L	TRAPA_H
+	DC.L	TRAPA_H
+	DC.L	TRAPA_H
+	DC.L	BREAK_H
+
+	ELSE
+
+	;; Minimum Mode
+	DC.W	CSTART
+	DC.W	DUMMY_H
+	DC.W	INVINS_H
+	DC.W	ZERDIV_H
+
+	DC.W	TRAPVS_H
+	DC.W	DUMMY_H
+	DC.W	DUMMY_H
+	DC.W	DUMMY_H
+
+	DC.W	ADDERR_H
+	DC.W	TRACE_H
+	DC.W	DUMMY_H
+	DC.W	NMI_H
+
+	DC.W	DUMMY_H
+	DC.W	DUMMY_H
+	DC.W	DUMMY_H
+	DC.W	DUMMY_H
+
+	DC.W	TRAPA_H
+	DC.W	TRAPA_H
+	DC.W	TRAPA_H
+	DC.W	TRAPA_H
+
+	DC.W	TRAPA_H
+	DC.W	TRAPA_H
+	DC.W	TRAPA_H
+	DC.W	TRAPA_H
+
+	DC.W	TRAPA_H
+	DC.W	TRAPA_H
+	DC.W	TRAPA_H
+	DC.W	TRAPA_H
+
+	DC.W	TRAPA_H
+	DC.W	TRAPA_H
+	DC.W	TRAPA_H
+	DC.W	BREAK_H
+
+	ENDIF
+
+
+CSTART:
+	IF USE_MAXIMUM
+
+	LDC	#(STACK >> 16),TP
+	MOV	#(STACK & $FFFF),SP
+
+	LDC	#(WORK_B >> 16),DP
+	ASSUME	DP:(WORK_B >> 16)
+
+	LDC	#(ROM_B >> 16),EP
+
+	ELSE
+
+	MOV	#STACK,SP
+
+	ENDIF
+
+	LDC	#$FF,BR
+	ASSUME	BR:$FF
+	
+	BSR	INIT
+
+	MOV	#(RAM_B & $FFFF),R0
+	MOV	R0,@DSADDR
+	MOV	R0,@SADDR
+	MOV	R0,@GADDR
+	MOV.B	#(RAM_B >> 16),@CURPAG
+	MOV.B	#'I',@HEXMOD
+
+	if USE_REGCMD
+	MOV	#REG_B,R1
+	CLR.B	R0
+INIR0:
+	MOV.B	R0,@R1+
+	CMP	#REG_E,R1
+	BCS	INIR0
+
+	MOV	#(RAM_B & $FFFF),R0
+	MOV	R0,@REGPC
+	MOV	#(STACK & $FFFF),R0
+	MOV	R0,@REGR7
+	if USE_MAXIMUM
+	MOV.B	#(RAM_B >> 16),R0
+	MOV.B	R0,REGCP
+	MOV.B	R0,REGDP
+	MOV.B	R0,REGEP
+	MOV.B	#(STACK >> 16),R0
+	MOV.B	R0,REGTP
+	endif
+	endif
+
+	;; Opening message
+	MOV	#OPNMSG,R4
+	BSR	STROUT
+
+WSTART:
+	MOV	#PROMPT,R4
+	BSR	STROUT
+	BSR	GETLIN
+	MOV	#INBUF,R1
+	BSR	SKIPSP
+	BSR	UPPER
+	TST.B	R0
+	BEQ	WSTART
+
+	CMP.B	#'D',R0
+	BEQ	DUMP
+	CMP.B	#'G',R0
+	BEQ	GO
+	CMP.B	#'S',R0
+	BEQ	SETM
+
+	CMP.B	#'L',R0
+	BEQ	LOADH
+	CMP.B	#'P',R0
+	BEQ	SAVEH
+
+	if USE_REGCMD
+	CMP.B	#'R',R0
+	BEQ	REG
+	endif
+ERR:
+	MOV	#ERRMSG,R4
+	BSR	STROUT
+	BRA	WSTART
+
+;;; Dump memory
+
+DUMP:
+	ADD	#1,R1
+	BSR	SKIPSP
+	BSR	RDADR		; 1st arg.
+	TST	R2
+	BNE	DP0
+	;; No arg.
+	BSR	SKIPSP
+	TST.B	R0
+	BNE	ERR
+	MOV	@DSADDR,R5
+	MOV	R5,R6
+	ADD	#128,R6		; DEADDR
+	BRA	DPM
+
+	;; 1st arg. found
+DP0:
+	MOV	R3,R5		; DSADDR
+	BSR	SKIPSP
+	CMP.B	#',',R0
+	BEQ	DP1
+	TST.B	R0
+	BNE	ERR
+	;; No 2nd arg.
+	MOV	R5,R6
+	ADD	#128,R6		; DEADDR
+	BRA	DPM
+
+DP1:
+	ADD	#1,R1
+	BSR	SKIPSP
+	BSR	RDHEX
+	BSR	SKIPSP
+	TST	R2
+	BEQ	ERR
+	TST.B	R0
+	BNE	ERR
+	MOV	R3,R6
+	ADD	#1,R6		; DEADDR
+
+	;; DUMP main
+DPM:
+	MOV	R5,R4
+	AND.B	#$F0,R4
+	XOR	R2,R2		; DSTATE = 0
+DPM0:
+	BSR	DPL
+	BSR	CONST
+	TST.B	R0
+	BNE	DPM1
+	CMP.B	#2,R2
+	BCS	DPM0
+	MOV	R6,@DSADDR
+	BRA	WSTART
+DPM1:
+	;; Abort
+	MOV	R4,@DSADDR
+	BSR	CONIN
+	BRA	WSTART
+
+	;; DUMP line
+DPL:
+	MOV	R4,R0
+	BSR	ADROUT
+
+	MOV	R4,@-SP
+	MOV	#DSEP0,R4
+	BSR	STROUT
+	MOV	@SP+,R4
+	MOV	#INBUF,R3
+	MOV	#16,R1		; Count
+DPL0:
+	BSR	DPB
+	ADD	#-1,R1
+	BNE	DPL0
+
+	MOV	R4,@-SP
+	MOV	#DSEP1,R4
+	BSR	STROUT
+	MOV	@SP+,R4
+
+	MOV	#INBUF,R3
+	MOV	#16,R1		; Count
+DPL1:
+	MOV.B	@R3+,R0
+	CMP.B	#' ',R0
+	BCS	DPL2
+	CMP.B	#$7F,R0
+	BCC	DPL2
+	BSR	CONOUT
+	BRA	DPL3
+DPL2:
+	MOV.B	#'.',R0
+	BSR	CONOUT
+DPL3:
+	ADD	#-1,R1
+	BNE	DPL1
+	BRA	CRLF
+
+	;; DUMP byte
+DPB:
+	MOV.B	#' ',R0
+	BSR	CONOUT
+	TST.B	R2		; DSTATE
+	BNE	DPB2
+	;; Dump state 0
+	CMP	R5,R4
+	BEQ	DPB1
+	;; Still 0 or 2
+DPB0:
+	MOV.B	#' ',R0
+	BSR	CONOUT
+	BSR	CONOUT
+	MOV.B	R0,@R3+
+	ADD	#1,R4
+	RTS
+	;; Found start address
+DPB1:
+	MOV.B	#1,R2		; DSTATE = 1
+DPB2:
+	CMP.B	#1,R2
+	BNE	DPB0
+	;; Dump state 1
+	IF USE_MAXIMUM
+	LDC	@CURPAG,EP
+	MOV.B	@R4+,R0
+	LDC	#(ROM_B >> 16),EP
+	ELSE
+	MOV.B	@R4+,R0
+	ENDIF
+	MOV.B	R0,@R3+
+	BSR	HEXOUT2
+
+	CMP	R6,R4
+	BEQ	DPB3
+	RTS
+	;; Found end address
+DPB3:
+	MOV.B	#2,R2		; DSTATE = 2
+	RTS
+
+;;; GO address
+
+GO:
+	if USE_REGCMD
+
+	ADD	#1,R1
+	BSR	SKIPSP
+	BSR	RDHEX
+	if USE_MAXIMUM
+	MOV.B	@R1,R0
+	CMP.B	#':',R0
+	BNE	G00
+	TST	R2
+	BEQ	ERR		; Empty PAGE
+	ADD	#1,R1
+	MOV.B	R3,@CURPAG
+	MOV.B	R3,@REGCP
+	BSR	RDHEX
+G00:
+	endif
+	BSR	SKIPSP
+	TST.B	R0
+	BNE	ERR
+	TST	R2
+	BEQ	G0
+	
+	MOV	R3,@REGPC
+G0:
+	if USE_MAXIMUM
+	LDC	@REGTP,TP
+	endif
+	MOV	@REGR7,R7
+
+	MOV	@REGPC,R0
+	MOV	R0,@-SP
+	if USE_MAXIMUM
+	MOV.B	@REGCP,R0
+	MOV	R0,@-SP
+	endif
+	MOV	@REGSR,R0
+	MOV	R0,@-SP
+
+	MOV	@REGR6,R6
+	MOV	@REGR5,R5
+	MOV	@REGR4,R4
+	MOV	@REGR3,R3
+	MOV	@REGR2,R2
+	MOV	@REGR1,R1
+	MOV	@REGR0,R0
+
+	LDC	@REGBR,BR
+	if USE_MAXIMUM
+	LDC	@REGEP:16,EP
+	LDC	@REGDP:16,DP
+	endif
+
+	RTE
+	
+	else
+
+	ADD	#1,R1
+	BSR	SKIPSP
+	BSR	RDADR
+	BSR	SKIPSP
+	TST.B	R0
+	BNE	ERR
+	TST	R2
+	BEQ	G0
+	MOV	R3,@GADDR
+G0:
+	MOV	@GADDR,R0
+	IF USE_MAXIMUM
+	MOV	R0,@-SP
+	MOV.B	@CURPAG,R0
+	MOV	R0,@-SP
+	PRTS
+	ELSE
+	JMP	@R0
+	ENDIF
+
+	endif
+
+;;; SET memory
+
+SETM:
+	ADD	#1,R1
+	BSR	SKIPSP
+	BSR	RDADR
+	BSR	SKIPSP
+	TST.B	R0
+	BNE	ERR
+	MOV	R3,R5
+	TST	R2
+	BNE	SM0
+	MOV	@SADDR,R5
+SM0:
+SM1:
+	MOV	R5,R0
+	BSR	ADROUT
+	MOV	#DSEP1,R4
+	BSR	STROUT
+	IF USE_MAXIMUM
+	LDC	@CURPAG,EP
+	MOV.B	@R5,R0
+	LDC	#(ROM_B >> 16),EP
+	ELSE
+	MOV.B	@R5,R0
+	ENDIF
+	BSR	HEXOUT2
+	MOV.B	#' ',R0
+	BSR	CONOUT
+	BSR	GETLIN
+	MOV	#INBUF,R1
+	BSR	SKIPSP
+	TST.B	R0
+	BNE	SM2
+	;; Empty (Increment address)
+	ADD	#1,R5
+	MOV	R5,@SADDR
+	BRA	SM1
+SM2:
+	CMP.B	#'-',R0
+	BNE	SM3
+	;; '-' (Decrement address)
+	ADD	#-1,R5
+	MOV	R5,@SADDR
+	BRA	SM1
+SM3:
+	CMP.B	#'.',R0
+	BNE	SM4
+	;; '.' (Quit)
+	MOV	R5,@SADDR
+	BRA	WSTART
+SM4:
+	BSR	RDHEX
+	TST	R2
+	BEQ	ERR
+	IF USE_MAXIMUM
+	LDC	@CURPAG,EP
+	MOV.B	R3,@R5+
+	LDC	#(ROM_B >> 16),EP
+	ELSE
+	MOV.B	R3,@R5+
+	ENDIF
+	MOV	R5,@SADDR
+	BRA	SM1
+
+;;; Load HEX file
+
+LOADH:
+	ADD	#1,R1
+	BSR	SKIPSP
+	BSR	RDADR
+	BSR	SKIPSP
+	TST.B	R0
+	BNE	ERR
+LH0:
+	BSR	CONIN
+	BSR	UPPER
+	CMP.B	#'S',R0
+	BEQ	LHS0
+LH1:
+	CMP.B	#':',R0
+	BEQ	LHI0
+	;; Skip to EOL
+LH2:
+	CMP.B	#CR,R0
+	BEQ	LH0
+	CMP.B	#LF,R0
+	BEQ	LH0
+LH3:
+	BSR	CONIN
+	BRA	LH2
+
+	;; Intel HEX
+LHI0:
+	BSR	HEXIN
+	MOV.B	R0,R1		; Length
+	MOV.B	R0,R2		; Checksum
+
+	BSR	HEXIN
+	MOV.B	R0,R4
+	SWAP	R4		; Address H
+	ADD.B	R0,R2		; Checksum
+
+	BSR	HEXIN
+	MOV.B	R0,R4		; Address L
+	ADD.B	R0,R2		; Checksum
+
+	;; Offset
+	ADD	R3,R4
+
+	BSR	HEXIN
+	MOV.B	R0,R5		; RECTYP
+	ADD.B	R0,R2		; Checksum
+	TST.B	R0
+	BEQ	LHI00
+	CMP.B	#$01,R0
+	BEQ	LHI00
+	BRA	LH3		; Skip unsupported record type
+LHI00:
+
+	TST.B	R1		; Length
+	BEQ	LHI3
+LHI1:
+	BSR	HEXIN
+	ADD.B	R0,R2		; Checksum
+
+	TST.B	R5		; RECTYP
+	BNE	LHI2
+
+	IF USE_MAXIMUM
+	LDC	@CURPAG,EP
+	MOV.B	R0,@R4+
+	LDC	#(ROM_B >> 16),EP
+	ELSE
+	MOV.B	R0,@R4+
+	ENDIF
+LHI2:
+	ADD.B	#-1,R1
+	BNE	LHI1
+LHI3:
+	BSR	HEXIN
+	ADD.B	R0,R2		; Checksum
+	BNE	LHIE		; Checksum error
+
+	TST.B	R5		; RECTYP
+	BEQ	LH3
+	BRA	WSTART
+LHIE:
+	MOV	#IHEMSG,R4
+	BSR	STROUT
+	BRA	WSTART
+
+	;; Motorola S record
+LHS0:
+	BSR	CONIN
+	MOV	#2,R5		; 2 byte address
+	CMP.B	#'1',R0
+	BEQ	LHS01
+	CMP.B	#'9',R0
+	BEQ	LHS00
+	MOV	#3,R5		; 3 byte address
+	CMP.B	#'2',R0
+	BEQ	LHS01
+	CMP.B	#'8',R0
+	BEQ	LHS00
+	MOV	#4,R5		; 4 byte address
+	CMP.B	#'3',R0
+	BEQ	LHS01
+	CMP.B	#'7',R0
+	BEQ	LHS00
+	BRA	LH3		; Skip unsupported record type
+LHS00:
+	BSET	#8,R5		; RECTYP (end)
+LHS01:
+
+	BSR	HEXIN
+	MOV.B	R0,R1		; Length + 2/3/4 + 1
+	MOV.B	R0,R2		; Checksum
+
+LHS02:
+	BSR	HEXIN
+	SWAP	R4
+	CLR.B	R4
+	MOV.B	R0,R4
+	ADD.B	R0,R2		; Checksum
+
+	ADD.B	#-1,R1
+	ADD.B	#-1,R5
+	BNE	LHS02
+
+	;; Add offset
+	ADD	R3,R4
+
+	ADD.B	#-1,R1
+	BEQ	LHS3
+LHS1:
+	BSR	HEXIN
+	ADD.B	R0,R2		; Checksum
+
+	BTST	#8,R5		; RECTYP
+	BNE	LHS2		; Skip if end record
+
+	IF USE_MAXIMUM
+	LDC	@CURPAG,EP
+	MOV.B	R0,@R4+
+	LDC	#(ROM_B >> 16),EP
+	ELSE
+	MOV.B	R0,@R4+
+	ENDIF
+LHS2:
+	ADD.B	#-1,R1
+	BNE	LHS1
+LHS3:
+	BSR	HEXIN
+	ADD.B	R0,R2		; Checksum
+	NOT.B	R2
+	BNE	LHSE		; Checksum error
+
+	BTST	#8,R5		; RECTYP
+	BEQ	LH3
+	BRA	WSTART
+LHSE:
+	MOV	#SHEMSG,R4
+	BSR	STROUT
+	BRA	WSTART
+
+;;; Save HEX file
+
+SAVEH:
+	ADD	#1,R1
+	MOV.B	@R1,R0
+	BSR	UPPER
+	CMP.B	#'I',R0
+	BEQ	SH0
+	CMP.B	#'S',R0
+	BNE	SH1
+SH0:
+	ADD	#1,R1
+	MOV.B	R0,@HEXMOD
+SH1:
+	BSR	SKIPSP
+	BSR	RDADR
+	TST	R2
+	BEQ	ERR		; Start address missing
+	MOV	R3,R4		; R4 = Start address
+	BSR	SKIPSP
+	CMP.B	#',',R0
+	BNE	ERR
+	ADD	#1,R1
+	BSR	SKIPSP
+	BSR	RDHEX
+	TST	R2
+	BEQ	ERR		; End address missing
+	MOV	R3,R5		; R5 = End address
+	BSR	SKIPSP
+	TST.B	R0
+	BNE	ERR
+
+	SUB	R4,R5
+	ADD	#1,R5		; R5 = Length
+SH3:
+	BSR	SHL
+	TST	R5
+	BNE	SH3
+
+	CMP.B	#'I',@HEXMOD
+	BNE	SH4
+	;; End record for Intel HEX
+	MOV	#IHEXER,R4
+	BSR	STROUT
+	BRA	WSTART
+SH4:
+	;; End record for Motorola S record
+	MOV	#SRECER,R4
+	BSR	STROUT
+	BRA	WSTART
+
+SHL:
+	MOV	#16,R1
+	CMP	R1,R5
+	BCC	SHL0
+	MOV	R5,R1
+SHL0:
+	SUB	R1,R5
+
+	CMP.B	#'I',@HEXMOD
+	BNE	SHLS
+
+	;; Intel Hex
+	MOV.B	#':',R0
+	BSR	CONOUT
+
+	MOV.B	R1,R0		; Length
+	BSR	HEXOUT2
+	MOV.B	R1,R2		; Checksum
+
+	MOV	R4,R0
+	SWAP	R0		; Address H
+	ADD.B	R0,R2		; Checksum
+	BSR	HEXOUT2
+
+	MOV.B	R4,R0		; Address L
+	ADD.B	R0,R2		; Checksum
+	BSR	HEXOUT2
+
+	CLR.B	R0
+	BSR	HEXOUT2
+SHLI0:
+	IF USE_MAXIMUM
+	LDC	@CURPAG,EP
+	MOV.B	@R4+,R0
+	LDC	#(ROM_B >> 16),EP
+	ELSE
+	MOV.B	@R4+,R0
+	ENDIF
+	ADD.B	R0,R2		; Checksum
+	BSR	HEXOUT2
+
+	ADD.B	#-1,R1
+	BNE	SHLI0
+
+	MOV.B	R2,R0
+	NEG.B	R0
+	BSR	HEXOUT2
+	BRA	CRLF
+
+SHLS:
+	;; Motorola S record
+	MOV.B	#'S',R0
+	BSR	CONOUT
+
+	MOV.B	#'1',R0
+	BSR	CONOUT
+
+	MOV.B	R1,R0
+	ADD.B	#2+1,R0		; DataLength + 2(addr) + 1(sum)
+	MOV.B	R0,R2		; Checksum
+	BSR	HEXOUT2
+
+	MOV	R4,R0
+	SWAP	R0		; Address H
+	ADD.B	R0,R2		; Checksum
+	BSR	HEXOUT2
+
+	MOV.B	R4,R0		; Address L
+	ADD.B	R0,R2		; Checksum
+	BSR	HEXOUT2
+SHLS0:
+	IF USE_MAXIMUM
+	LDC	@CURPAG,EP
+	MOV.B	@R4+,R0
+	LDC	#(ROM_B >> 16),EP
+	ELSE
+	MOV.B	@R4+,R0
+	ENDIF
+	ADD.B	R0,R2		; Checksum
+	BSR	HEXOUT2
+
+	ADD.B	#-1,R1
+	BNE	SHLS0
+
+	MOV.B	R2,R0
+	NOT.B	R0
+	BSR	HEXOUT2
+	BRA	CRLF
+
+;;; Register
+
+	if USE_REGCMD
+
+REG:
+	ADD	#1,R1
+	BSR	SKIPSP
+	BSR	UPPER
+	TST.B	R0
+	BNE	RG0
+	BSR	RDUMP
+	BRA	WSTART
+RG0:
+	MOV	#RNTAB,R5
+RG1:
+	CMP.B	@R5,R0
+	BEQ	RG2		; Character match
+	TST.B	@(1,R5)
+	BEQ	RGE
+	ADD	#6,R5
+	BRA	RG1
+RG2:
+	CMP.B	#$0F,@(1,R5)
+	BNE	RG3
+	;; Next table
+	MOV	@(2,R5),R5
+	ADD	#1,R1
+	MOV.B	@R1,R0
+	BSR	UPPER
+	BRA	RG1
+RG3:
+	TST.B	@(1,R5)
+	BEQ	RGE		; Found end mark
+	MOV	@(4,R5),R4
+	BSR	STROUT
+	MOV.B	#'=',R0
+	BSR	CONOUT
+	MOV	@(2,R5),R2
+	CMP.B	#1,@(1,R5)
+	BNE	RG4
+	;; 8 bit register
+	MOV.B	@R2,R0
+	BSR	HEXOUT2
+	BRA	RG6
+RG4:
+	;; 16 bit register
+	MOV	@R2,R0
+	BSR	HEXOUT4
+RG6:
+	MOV.B	#' ',R0
+	BSR	CONOUT
+	BSR	GETLIN
+	MOV	#INBUF,R1
+	BSR	SKIPSP
+	BSR	RDHEX
+	TST	R2
+	BEQ	RGR
+	MOV	@(2,R5),R2
+	CMP.B	#1,@(1,R5)
+	BNE	RG7
+	;; 8 bit register
+	MOV.B	R3,@R2
+	BRA	RG9
+RG7:
+	;; 16 bit register
+	MOV	R3,@R2
+RG9:
+RGR:
+	BRA	WSTART
+RGE:
+	BRA	ERR
+
+RDUMP:
+	MOV	#RDTAB,R5
+RD0:
+	MOV	@R5+,R1		; Flag
+	BEQ	CRLF		; Found END mark => CR,LF and return
+	MOV	@R5+,R4		; String address
+	BSR	STROUT
+	MOV	@R5+,R2		; Register save area
+	CMP	#1,R1
+	BNE	RD1
+	;; BYTE size
+	MOV.B	@R2,R0
+	BSR	HEXOUT2
+	BRA	RD0
+RD1:
+	;; WORD size
+	MOV	@R2,R0
+	BSR	HEXOUT4
+	BRA	RD0
+
+	RTS
+
+	endif
+
+;;; Other support routines
+
+STROUT:
+	MOV.B	@R4+,R0
+	BEQ	STROR
+	BSR	CONOUT
+	BRA	STROUT
+STROR:
+	RTS
+
+HEXOUT4:
+	MOV	R0,@-SP
+	SWAP	R0
+	BSR	HEXOUT2
+	MOV	@SP+,R0
+HEXOUT2:
+	MOV	R0,@-SP
+	SHLR	R0
+	SHLR	R0
+	SHLR	R0
+	SHLR	R0
+	BSR	HEXOUT1
+	MOV	@SP+,R0
+HEXOUT1:
+	AND.B	#$0F,R0
+	ADD.B	#'0',R0
+	CMP.B	#'9'+1,R0
+	BCS	CONOUT
+	ADD.B	#'A'-'9'-1,R0
+	BRA	CONOUT
+
+HEXIN:
+	CLR	R0
+	BSR	HI0
+	SHLL.B	R0
+	SHLL.B	R0
+	SHLL.B	R0
+	SHLL.B	R0
+HI0:
+	MOV	R0,@-SP
+	BSR	CONIN
+	BSR	UPPER
+	CMP.B	#'0',R0
+	BCS	HIR
+	CMP.B	#'9'+1,R0
+	BCS	HI1
+	CMP.B	#'A',R0
+	BCS	HIR
+	CMP.B	#'F'+1,R0
+	BCC	HIR
+	ADD.B	#-('A'-'9'-1),R0
+HI1:
+	ADD.B	#-'0',R0
+	OR	@SP+,R0
+	RTS
+HIR:
+	ADD	#2,SP
+	RTS
+
+CRLF:
+	MOV.B	#CR,R0
+	BSR	CONOUT
+	MOV.B	#LF,R0
+	BRA	CONOUT
+
+GETLIN:
+	MOV	#INBUF,R1
+	XOR	R2,R2
+GL0:
+	BSR	CONIN
+	CMP.B	#CR,R0
+	BEQ	GLE
+	CMP.B	#LF,R0
+	BEQ	GLE
+	CMP.B	#BS,R0
+	BEQ	GLB
+	CMP.B	#DEL,R0
+	BEQ	GLB
+	CMP.B	#' ',R0
+	BCS	GL0
+	CMP.B	#$80,R0
+	BCC	GL0
+	CMP.B	#BUFLEN-1,R2
+	BCC	GL0		; Too long
+	ADD.B	#1,R2
+	MOV.B	R0,@R1+
+	BSR	CONOUT
+	BRA	GL0
+GLB:
+	TST.B	R2
+	BEQ	GL0
+	ADD	#-1,R1
+	ADD.B	#-1,R2
+	MOV.B	#BS,R0
+	BSR	CONOUT
+	MOV.B	#' ',R0
+	BSR	CONOUT
+	MOV.B	#BS,R0
+	BSR	CONOUT
+	BRA	GL0
+GLE:
+	BSR	CRLF
+	MOV.B	#$00,@R1
+	RTS
+
+SKIPSP:
+	MOV.B	@R1+,R0
+	CMP.B	#' ',R0
+	BEQ	SKIPSP
+	ADD	#-1,R1
+	RTS
+
+UPPER:
+	CMP.B	#'a',R0
+	BCS	UPR
+	CMP.B	#'z'+1,R0
+	BCC	UPR
+	ADD.B	#'A'-'a',R0
+UPR:
+	RTS
+
+RDHEX:
+	XOR	R2,R2		; Count
+	XOR	R3,R3		; Value
+RH0:
+	MOV.B	@R1,R0
+	BSR	UPPER
+	CMP.B	#'0',R0
+	BCS	RHE
+	CMP.B	#'9'+1,R0
+	BCS	RH1
+	CMP.B	#'A',R0
+	BCS	RHE
+	CMP.B	#'F'+1,R0
+	BCC	RHE
+	ADD.B	#-('A'-'9'-1),R0
+RH1:
+	ADD.B	#-'0',R0
+	SHLL	R3
+	SHLL	R3
+	SHLL	R3
+	SHLL	R3
+	OR.B	R0,R3
+	ADD	#1,R1
+	ADD	#1,R2
+	BRA	RH0
+RHE:
+	RTS
+
+ADROUT:
+	IF USE_MAXIMUM
+	MOV	R0,@-SP
+	MOV.B	CURPAG,R0
+	BSR	HEXOUT2
+	MOV.B	#':',R0
+	BSR	CONOUT
+	MOV	@SP+,R0
+	ENDIF
+	BRA	HEXOUT4
+
+RDADR:
+	BSR	RDHEX
+	MOV.B	@R1,R0
+	CMP.B	#':',R0
+	BNE	RAR
+	MOV.B	R3,CURPAG
+	ADD	#1,R1
+	BSR	RDHEX
+	TST	R2
+	BNE	RAR
+	ADD	#-1,R1
+RAR:
+	RTS
+
+;;; Exception Handler
+
+	;ASSUME	BR:NOTHING
+
+	;; Dummy
+DUMMY_H:
+	RTE
+
+	;; Invalid Instruction
+INVINS_H:
+	MOV	#INVINS_M,@-SP
+	BRA	COMM_H
+
+	;; DIVXU Instruction with Zero Divisor
+ZERDIV_H:
+	MOV	#ZERDIV_M,@-SP
+	BRA	COMM_H
+
+	;; TRAP/VS Instruction
+TRAPVS_H:
+	MOV	#TRAPVS_M,@-SP
+	BRA	COMM_H
+
+	;; Address Error
+ADDERR_H:
+	MOV	#ADDERR_M,@-SP
+	BRA	COMM_H
+
+	;; Trace
+TRACE_H:
+	MOV	#TRACE_M,@-SP
+	BRA	COMM_H
+
+	;; NMI
+NMI_H:
+	MOV	#NMI_M,@-SP
+	BRA	COMM_H
+
+	;; TRAPA
+TRAPA_H:
+	MOV	#TRAPA_M,@-SP
+	BRA	COMM_H
+
+	;; Break
+BREAK_H:
+	MOV	#BREAK_M,@-SP
+
+COMM_H:
+	if USE_REGCMD
+
+	if USE_MAXIMUM
+	MOV	R0,@-SP
+	STC	DP,R0
+	LDC	#(WORK_B >> 16),DP
+	MOV.B	R0,@REGDP:16
+	MOV	@SP+,R0
+	STC	TP,@REGTP:16
+	STC	EP,@REGEP:16
+	LDC	#(ROM_B >> 16),EP
+	endif
+	STC	BR,@REGBR:16
+	LDC	#$FF,BR
+	ASSUME	BR:$FF
+
+	MOV	R0,@REGR0
+	MOV	R1,@REGR1
+	MOV	R2,@REGR2
+	MOV	R3,@REGR3
+	MOV	R4,@REGR4
+	MOV	R5,@REGR5
+	MOV	R6,@REGR6
+
+	MOV	@SP+,R0
+	MOV	R0,@EXMSG
+	MOV	@SP+,R0
+	MOV	R0,@REGSR
+	if USE_MAXIMUM
+	MOV	@SP+,R0
+	MOV.B	R0,@REGCP
+	endif
+	MOV	@SP+,R0
+	MOV	R0,@REGPC
+	MOV	R7,@REGR7
+
+	MOV	@EXMSG,R4
+	BSR	STROUT
+	BSR	CRLF
+	BSR	RDUMP
+
+	else			; USE_REGCMD
+
+	MOV	@SP+,R4
+	if USE_MAXIMUM
+	ADD	#6,SP
+	else
+	ADD	#4,SP
+	endif
+	BSR	STROUT
+	BSR	CRLF
+	
+	endif
+
+	BRA	WSTART
+
+;;; Data area
+
+OPNMSG:	DC.B	CR,LF,"Universal Monitor H8/500",CR,LF,$00
+
+PROMPT:	DC.B	"] ",$00
+
+IHEMSG:	DC.B	"Error ihex",CR,LF,$00
+SHEMSG:	DC.B	"Error srec",CR,LF,$00
+ERRMSG:	DC.B	"Error",CR,LF,$00
+
+DSEP0:	DC.B	" :",$00
+DSEP1:	DC.B	" : ",$00
+IHEXER:	DC.B	":00000001FF",CR,LF,$00
+SRECER: DC.B	"S9030000FC",CR,LF,$00
+
+INVINS_M:
+	DC.B	"Invalid Instruction",$00
+ZERDIV_M:
+	DC.B	"Zero Divide",$00
+TRAPVS_M:
+	DC.B	"TRAP/VS Instruction",$00
+ADDERR_M:
+	DC.B	"Address Error",$00
+TRACE_M:
+	DC.B	"Trace",$00
+NMI_M:
+	DC.B	"NMI",$00
+TRAPA_M:
+	DC.B	"TRAPA Instruction",$00
+BREAK_M:
+	DC.B	"Break",$00
+
+	if USE_REGCMD
+
+	ALIGN	2
+
+RDTAB:	DC.W	2, RDSR07, REGR0
+	DC.W	2, RDSC,   REGR1
+	DC.W	2, RDSC,   REGR2
+	DC.W	2, RDSC,   REGR3
+	DC.W	2, RDSCS,  REGR4
+	DC.W	2, RDSC,   REGR5
+	DC.W	2, RDSC,   REGR6
+	DC.W	2, RDSC,   REGR7
+
+	DC.W	2, RDSPC,  REGPC
+	DC.W	2, RDSSR,  REGSR
+	DC.W	1, RDSBR,  REGBR
+	if USE_MAXIMUM
+	DC.W	1, RDSCP,  REGCP
+	DC.W	1, RDSDP,  REGDP
+	DC.W	1, RDSTP,  REGTP
+	DC.W	1, RDSEP,  REGEP
+	endif
+
+	DC.W	0		; END
+
+RDSR07:	DC.B	"R0-R7=",$00
+RDSPC:	DC.B	CR,LF,"PC=",$00
+RDSSR:	DC.B	" SR=",$00
+RDSBR:	DC.B	" BR=",$00
+RDSCP:	DC.B	"  CP=",$00
+RDSDP:	DC.B	" DP=",$00
+RDSTP:	DC.B	" TP=",$00
+RDSEP:	DC.B	" EP=",$00
+RDSC:	DC.B	",",$00
+RDSCS:	DC.B	", ",$00
+
+	ALIGN	2
+RNTAB:
+	DC.B	'B',$0F		; "B?"
+	DC.W	RNTABB,0
+	DC.B	'C',$0F		; "C?"
+	DC.W	RNTABC,0
+	DC.B	'D',$0F		; "D?"
+	DC.W	RNTABD,0
+	DC.B	'E',$0F		; "E?"
+	DC.W	RNTABE,0
+	DC.B	'F',$0F		; "F?"
+	DC.W	RNTABF,0
+	DC.B	'P',$0F		; "P?"
+	DC.W	RNTABP,0
+	DC.B	'R',$0F		; "R?"
+	DC.W	RNTABR,0
+	DC.B	'S',$0F		; "S?"
+	DC.W	RNTABS,0
+	DC.B	'T',$0F		; "T?"
+	DC.W	RNTABT,0
+
+	DC.B	$00,$00		; End mark
+	DC.W	0,0
+
+RNTABB:
+	DC.B	'R', 1		; "BR"
+	DC.W	REGBR, RNBR
+
+	DC.B	$00,$00		; End mark
+	DC.W	0,0
+
+RNTABC:
+	DC.B	'C',$0F		; "CC?"
+	DC.W	RNTABCC,0
+	if USE_MAXIMUM
+	DC.B	'P',1		; "CP"
+	DC.W	REGCP,RNCP
+	endif
+
+	DC.B	$00,$00		; End mark
+	DC.W	0,0
+
+RNTABCC:
+	DC.B	'R', 1		; "CCR"
+	DC.W	REGSR+1,RNCCR
+
+	DC.B	$00,$00		; End mark
+	DC.W	0,0
+
+RNTABD:
+	if USE_MAXIMUM
+	DC.B	'P', 1		; "DP"
+	DC.W	REGDP,RNDP
+	endif
+
+	DC.B	$00,$00		; End mark
+	DC.W	0,0
+
+RNTABE:
+	if USE_MAXIMUM
+	DC.B	'P', 1		; "EP"
+	DC.W	REGEP,RNEP
+	endif
+
+	DC.B	$00,$00		; End mark
+	DC.W	0,0
+
+RNTABF:
+	DC.B	'P', 1		; "FP"
+	DC.W	REGR6,RNFP
+
+	DC.B	$00,$00		; End mark
+	DC.W	0,0
+
+RNTABP:
+	DC.B	'C', 2		; "PC"
+	DC.W	REGPC,RNPC
+
+	DC.B	$00,$00		; End mark
+	DC.W	0,0
+
+RNTABR:
+	DC.B	'0', 2		; "R0"
+	DC.W	REGR0,RNR0
+	DC.B	'1', 2		; "R1"
+	DC.W	REGR1,RNR1
+	DC.B	'2', 2		; "R2"
+	DC.W	REGR2,RNR2
+	DC.B	'3', 2		; "R3"
+	DC.W	REGR3,RNR3
+	DC.B	'4', 2		; "R4"
+	DC.W	REGR4,RNR4
+	DC.B	'5', 2		; "R5"
+	DC.W	REGR5,RNR5
+	DC.B	'6', 2		; "R6"
+	DC.W	REGR6,RNR6
+	DC.B	'7', 2		; "R7"
+	DC.W	REGR7,RNR7
+
+	DC.B	$00,$00		; End mark
+	DC.W	0,0
+
+RNTABS:
+	DC.B	'P', 2		; "SP"
+	DC.W	REGR7,RNSP
+	DC.B	'R', 2		; "SR"
+	DC.W	REGSR,RNSR
+
+	DC.B	$00,$00		; End mark
+	DC.W	0,0
+
+RNTABT:
+	if USE_MAXIMUM
+	DC.B	'P', 1		; "TP"
+	DC.W	REGTP,RNTP
+	endif
+
+	DC.B	$00,$00		; End mark
+	DC.W	0,0
+
+RNBR:	DC.B	"BR",$00
+RNCP:	DC.B	"CP",$00
+RNCCR:	DC.B	"CCR",$00
+RNDP:	DC.B	"DP",$00
+RNEP:	DC.B	"EP",$00
+RNFP:	DC.B	"FP",$00
+RNPC:	DC.B	"PC",$00
+RNR0:	DC.B	"R0",$00
+RNR1:	DC.B	"R1",$00
+RNR2:	DC.B	"R2",$00
+RNR3:	DC.B	"R3",$00
+RNR4:	DC.B	"R4",$00
+RNR5:	DC.B	"R5",$00
+RNR6:	DC.B	"R6",$00
+RNR7:	DC.B	"R7",$00
+RNSP:	DC.B	"SP",$00
+RNSR:	DC.B	"SR",$00
+RNTP:	DC.B	"TP",$00
+
+	endif
+
+	IF USE_DEV_SCI
+	INCLUDE "dev/dev_sci.asm"
+	ENDIF
+
+	IF USE_DEV_EMILY
+	INCLUDE	"dev/dev_emily.asm"
+	ENDIF
+
+;;;
+;;; RAM area
+;;;
+
+	ORG	WORK_B
+
+INBUF:	DS.B	BUFLEN		; Line input buffer
+DSADDR:	DS.W	1		; DUMP start address
+SADDR:	DS.W	1		; SET address
+GADDR:	DS.W	1		; GO address
+CURPAG:	DS.B	1		; Current page
+HEXMOD:	DS.B	1		; HEX file mode
+
+	ALIGN	2
+
+EXMSG:	DS.W	1		; Exception Message
+
+	IF USE_REGCMD
+REG_B:
+REGPC:	DS.W	1
+REGSR:	DS.W	1
+REGR0:	DS.W	1
+REGR1:	DS.W	1
+REGR2:	DS.W	1
+REGR3:	DS.W	1
+REGR4:	DS.W	1
+REGR5:	DS.W	1
+REGR6:	DS.W	1
+REGR7:	DS.W	1
+REGBR:	DS.B	1
+	IF USE_MAXIMUM
+REGCP:	DS.B	1
+REGDP:	DS.B	1
+REGTP:	DS.B	1
+REGEP:	DS.B	1
+	ENDIF
+REG_E:
+	ENDIF

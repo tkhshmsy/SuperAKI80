@@ -1,0 +1,1194 @@
+;;;
+;;; Universal Monitor COSMAC
+;;;   Copyright (C) 2021  Haruo Asano
+;;;
+
+	CPU	1802
+
+	INCLUDE	"config.inc"
+
+	INCLUDE	"../common.inc"
+	INCLUDE	"cosmac.inc"
+
+;;;
+;;; ROM area
+;;;
+
+	ORG	0000H
+
+	;; SCRT initialization
+	LDI	high(CSTART)
+	PHI	PC
+	LDI	low(CSTART)
+	PLO	PC
+
+	LDI	high(CALLR)
+	PHI	CALL
+	LDI	low(CALLR)
+	PLO	CALL
+	LDI	high(RETR)
+	PHI	RETN
+	LDI	low(RETR)
+	PLO	RETN
+	LDI	high(STACK)
+	PHI	SP
+	LDI	low(STACK)
+	PLO	SP
+	SEX	SP
+	SEP	PC		; Jump to CSTART
+
+	;; SCRT: Standard CALL
+EXITC:
+	SEP	PC
+CALLR:
+	SEX	SP
+	GHI	LINK		; Save current LINK to STACK
+	STXD
+	GLO	LINK
+	STXD
+	GHI	PC		; Copy PC to LINK
+	PHI	LINK
+	GLO	PC
+	PLO	LINK
+	LDA	LINK		; PC.h = (LINK)+
+	PHI	PC
+	LDA	LINK		; PC.l = (LINK)+
+	PLO	PC
+	BR	EXITC
+
+	;; SCRT: Standard RETuRn
+EXITR:
+	SEP	PC		; Return to Main Program
+RETR:
+	GHI	LINK		; Recover calling program return address
+	PHI	PC
+	GLO	LINK
+	PLO	PC
+	SEX	SP
+	INC	SP
+	LDXA			; Restore the contents of LINK
+	PLO	LINK
+	LDX
+	PHI	LINK
+	BR	EXITR
+
+
+CSTART:
+	SEP	CALL
+	DW	INIT
+
+	LDI	high(DSADDR)
+	PHI	15
+	LDI	low(DSADDR)
+	PLO	15
+	LDI	4		; DSADDR,DEADDR,GADDR,SADDR
+	PLO	8
+CS00:	
+	LDI	high(RAM_B)
+	STR	15
+	INC	15
+	LDI	low(RAM_B)
+	STR	15
+	INC	15
+	DEC	8
+	GLO	8
+	BNZ	CS00
+	
+	;; Opening message
+	LDI	high(OPNMSG)
+	PHI	9
+	LDI	low(OPNMSG)
+	PLO	9
+	SEP	CALL
+	DW	STROUT
+
+WSTART:
+	LDI	high(PROMPT)
+	PHI	9
+	LDI	low(PROMPT)
+	PLO	9
+	SEP	CALL
+	DW	STROUT
+	SEP	CALL
+	DW	GETLIN
+	LDI	high(INBUF)
+	PHI	9
+	LDI	low(INBUF)
+	PLO	9
+	SEP	CALL
+	DW	SKIPSP
+	LDN	9
+	BZ	WSTART
+	PLO	8
+	SEP	CALL
+	DW	UPPER
+
+	GLO	8
+	SMI	'D'
+	BNZ	M00
+	LBR	DUMP
+M00:	
+	GLO	8
+	SMI	'G'
+	BNZ	M01
+	LBR	GO
+M01:
+	GLO	8
+	SMI	'S'
+	BNZ	M02
+	LBR	SETM
+M02:
+	GLO	8
+	SMI	'L'
+	BNZ	M03
+	LBR	LOADH
+M03:
+
+	GLO	8
+	SMI	'I'
+	BNZ	M05
+	LBR	PIN
+M05:
+	GLO	8
+	SMI	'O'
+	BNZ	M06
+	LBR	POUT
+M06:
+
+ERR:
+	LDI	high(ERRMSG)
+	PHI	9
+	LDI	low(ERRMSG)
+	PLO	9
+	SEP	CALL
+	DW	STROUT
+	BR	WSTART
+
+	ALIGN	256
+
+;;; Dump memory
+
+DUMP:
+	INC	9
+	SEP	CALL
+	DW	SKIPSP
+	SEP	CALL
+	DW	RDHEX		; 1st arg.
+	GLO	10
+	BNZ	DP0
+	;; No arg.
+	SEP	CALL
+	DW	SKIPSP
+	LDN	9
+	BNZ	DPE
+DP00:	
+	;; (DEADDR) = (DSADDR) + 128
+	LDI	high(DSADDR+1)
+	PHI	15
+	LDI	low(DSADDR+1)
+	PLO	15
+	LDA	15
+	ADI	128
+	INC	15		; DEADDR+1
+	STR	15
+	DEC	15
+	DEC	15
+	DEC	15		; DSADDR
+	LDA	15
+	ADCI	0
+	INC	15		; DEADDR
+	STR	15
+	BR	DPM
+
+	;; 1st arg. found
+DP0:
+	;; (DSADDR) = R11
+	LDI	high(DSADDR)
+	PHI	15
+	LDI	low(DSADDR)
+	PLO	15
+	GHI	11
+	STR	15
+	INC	15
+	GLO	11
+	STR	15
+	SEP	CALL
+	DW	SKIPSP
+	LDN	9
+	SMI	','
+	BZ	DP1
+	LDN	9
+	BNZ	DPE
+	;; No 2nd arg.
+	BR	DP00
+
+DP1:
+	INC	9
+	SEP	CALL
+	DW	SKIPSP
+	SEP	CALL
+	DW	RDHEX
+	SEP	CALL
+	DW	SKIPSP
+	GLO	10		; count
+	BZ	DPE
+	LDN	9
+	BNZ	DPE
+	INC	11
+	LDI	high(DEADDR)
+	PHI	15
+	LDI	low(DEADDR)
+	PLO	15
+	GHI	11
+	STR	15
+	INC	15
+	GLO	11
+	STR	15
+
+	;; DUMP main
+DPM:
+	LDI	high(DSADDR)
+	PHI	15
+	LDI	low(DSADDR)
+	PLO	15
+	LDA	15
+	PHI	10
+	LDN	15
+	ANI	0F0H
+	PLO	10
+	LDI	0
+	PHI	11		; DSTATE
+DPM0:
+	SEP	CALL
+	DW	DPL
+	SEP	CALL
+	DW	CONST
+	GLO	8
+	SMI	1
+	BZ	DPM1		; Abort
+	GHI	11		; DSTATE
+	SMI	2
+	BL	DPM0
+	LDI	high(DEADDR+1)
+	PHI	15
+	LDI	low(DEADDR+1)
+	PLO	15
+	LDN	15
+	DEC	15
+	DEC	15		; DSADDR+1
+	STR	15
+	INC	15		; DEADDR
+	LDN	15
+	DEC	15
+	DEC	15		; DSADDR
+	STR	15
+	LBR	WSTART
+DPM1:
+	LDI	high(DSADDR)
+	PHI	15
+	LDI	low(DSADDR)
+	PLO	15
+	GHI	10
+	STR	15
+	INC	15
+	GLO	10
+	STR	15
+	SEP	CALL
+	DW	CONIN
+	LBR	WSTART
+
+DPE:
+	LBR	ERR
+
+	;; DUMP	line
+DPL:
+	GHI	10
+	PLO	8
+	SEP	CALL
+	DW	HEXOUT2
+	GLO	10
+	PLO	8
+	SEP	CALL
+	DW	HEXOUT2
+
+	LDI	high(DSEP0)
+	PHI	9
+	LDI	low(DSEP0)
+	PLO	9
+	SEP	CALL
+	DW	STROUT
+
+	LDI	high(INBUF)
+	PHI	12
+	LDI	low(INBUF)
+	PLO	12
+	LDI	16
+	PLO	11		; Count
+DPL0:
+	SEP	CALL
+	DW	DPB
+	DEC	11
+	GLO	11
+	BNZ	DPL0
+
+	LDI	high(DSEP1)
+	PHI	9
+	LDI	low(DSEP1)
+	PLO	9
+	SEP	CALL
+	DW	STROUT
+	
+	LDI	high(INBUF)
+	PHI	12
+	LDI	low(INBUF)
+	PLO	12
+	LDI	16
+	PLO	11		; Count
+DPL1:
+	LDN	12
+	SMI	' '
+	BL	DPL2
+	LDN	12
+	SMI	7FH
+	BGE	DPL2
+	LDA	12
+	BR	DPL3
+DPL2:
+	INC	12
+	LDI	'.'
+DPL3:
+	PLO	8
+	SEP	CALL
+	DW	CONOUT
+	DEC	11
+	GLO	11
+	BNZ	DPL1
+	
+	LBR	CRLF
+
+	ALIGN	256
+
+	;; DUMP byte
+DPB:
+	LDI	' '
+	PLO	8
+	SEP	CALL
+	DW	CONOUT
+	GHI	11		; DSTATE
+	BNZ	DPB2
+	;; Dump state 0
+	LDI	high(DSADDR)
+	PHI	14
+	LDI	low(DSADDR)
+	PLO	14
+	SEX	14		; DSADDR
+	GHI	10
+	SM
+	BNZ	DPB0
+	IRX
+	GLO	10
+	SM
+	DEC	14
+	BZ	DPB1
+	;; Still 0 or 2
+DPB0:
+	LDI	' '
+	PLO	8
+	STR	12
+	SEP	CALL
+	DW	CONOUT
+	SEP	CALL
+	DW	CONOUT
+	INC	10
+	INC	12
+	SEP	RETN
+	;; Found start address
+DPB1:
+	LDI	1
+	PHI	11
+DPB2:
+	GHI	11
+	SMI	1
+	BNZ	DPB0
+	;; Dump state 1
+	LDA	10
+	STR	12
+	INC	12
+	PLO	8
+	SEP	CALL
+	DW	HEXOUT2
+	LDI	high(DEADDR)
+	PHI	14
+	LDI	low(DEADDR)
+	PLO	14
+	SEX	14
+	GHI	10
+	SM
+	BNZ	DPB4
+	IRX
+	GLO	10
+	SM
+	BNZ	DPB4
+	;; Found end address
+DPB3:
+	LDI	2
+	PHI	11		; DSTATE
+DPB4:	
+	SEP	RETN
+
+;;; GO address
+
+GO:
+	INC	9
+	SEP	CALL
+	DW	SKIPSP
+	SEP	CALL
+	DW	RDHEX
+	SEP	CALL
+	DW	SKIPSP
+	LDN	9
+	BNZ	GOE
+	LDI	high(GADDR)
+	PHI	15
+	LDI	low(GADDR)
+	PLO	15
+	GLO	10
+	BZ	G0
+	GHI	11
+	STR	15
+	INC	15		; GADDR+1
+	GLO	11
+	STR	15
+	DEC	15		; GADDR
+G0:
+	LDI	high(G1)
+	PHI	10
+	LDI	low(G1)
+	PLO	10
+	SEP	10
+G1:	
+	LDA	15
+	PHI	3
+	LDN	15
+	PLO	3
+	SEP	3
+GOE:
+	LBR	ERR
+
+	ALIGN	256
+
+;;; SET memory
+
+SETM:
+	INC	9
+	SEP	CALL
+	DW	SKIPSP
+	SEP	CALL
+	DW	RDHEX
+	SEP	CALL
+	DW	SKIPSP
+	LDN	9
+	BNZ	SME
+	GHI	11
+	PHI	13
+	GLO	11
+	PLO	13
+	GLO	10
+	BNZ	SM0
+	LDI	high(SADDR)
+	PHI	15
+	LDI	low(SADDR)
+	PLO	15
+	LDA	15
+	PHI	13
+	LDN	15
+	PLO	13
+SM0:
+SM1:
+	GHI	13
+	PLO	8
+	SEP	CALL
+	DW	HEXOUT2
+	GLO	13
+	PLO	8
+	SEP	CALL
+	DW	HEXOUT2
+
+	LDI	high(DSEP1)
+	PHI	9
+	LDI	low(DSEP1)
+	PLO	9
+	SEP	CALL
+	DW	STROUT
+
+	LDN	13
+	PLO	8
+	SEP	CALL
+	DW	HEXOUT2
+
+	LDI	' '
+	PLO	8
+	SEP	CALL
+	DW	CONOUT
+	SEP	CALL
+	DW	GETLIN
+	LDI	high(INBUF)
+	PHI	9
+	LDI	low(INBUF)
+	PLO	9
+	SEP	CALL
+	DW	SKIPSP
+	LDN	9
+	BNZ	SM2
+	;; Empty (Increment address)
+	INC	13
+	BR	SM5
+SM2:
+	SMI	'-'
+	BNZ	SM3
+	;; '-' (Decrement address)
+	DEC	13
+	BR	SM5
+SM3:
+	LDN	9
+	SMI	'.'
+	BNZ	SM4
+	;; '.' (Quit)
+	LBR	WSTART
+SM4:
+	SEP	CALL
+	DW	RDHEX
+	GLO	10
+	BZ	SME
+	GLO	11
+	STR	13
+	INC	13
+SM5:
+	LDI	high(SADDR)
+	PHI	15
+	LDI	low(SADDR)
+	PLO	15
+	GHI	13
+	STR	15
+	INC	15
+	GLO	13
+	STR	15
+	BR	SM1
+SME:
+	LBR	ERR
+
+;;; Load HEX file
+
+LOADH:
+	INC	9
+	SEP	CALL
+	DW	SKIPSP
+	SEP	CALL
+	DW	RDHEX
+	SEP	CALL
+	DW	SKIPSP
+	LDN	9
+	BNZ	SME
+	LDI	high(CSUM)
+	PHI	13
+	LDI	low(CSUM)
+	PLO	13
+	LDI	high(DEADDR)	; Use this for OFFSET
+	PHI	14
+	LDI	low(DEADDR)
+	PLO	14
+	GHI	11
+	STR	14
+	GLO	11
+	INC	14
+	STR	14
+LH0:
+	SEP	CALL
+	DW	CONIN
+	SEP	CALL
+	DW	UPPER
+	GLO	8
+	SMI	'S'
+	BNZ	LH1
+	LBR	LHS0
+LH1:
+	GLO	8
+	SMI	':'
+	BNZ	LH2
+	LBR	LHI0
+	;; Skip to EOL
+LH2:
+	GLO	8
+	SMI	CR
+	BZ	LH0
+	GLO	8
+	SMI	LF
+	BZ	LH0
+LH3:
+	SEP	CALL
+	DW	CONIN
+	BR	LH2
+
+	;; Intel HEX
+LHI0:
+	SEP	CALL
+	DW	HEXIN
+	GLO	8
+	PLO	10		; Length
+	STR	13		; Checksum
+
+	SEP	CALL
+	DW	HEXIN
+	GLO	8
+	PHI	11		; Address H
+	SEX	13
+	ADD
+	STR	13		; Checksum
+
+	SEP	CALL
+	DW	HEXIN
+	GLO	8
+	PLO	11		; Address L
+	SEX	13
+	ADD
+	STR	13		; Checksum
+
+	;; Offset
+	SEX	14
+	GLO	11
+	ADD
+	PLO	11
+	DEC	14
+	GHI	11
+	ADC
+	PHI	11
+	INC	14
+
+	SEP	CALL
+	DW	HEXIN
+	GLO	8
+	PHI	10		; RECTYP
+	SEX	13
+	ADD
+	STR	13		; Checksum
+	GLO	8
+	BZ	LHI00
+	SMI	01H
+	BZ	LHI00
+	LBR	LH3		; Skip unsupported record type
+LHI00:
+	GLO	10
+	BZ	LHI3
+LHI1:
+	SEP	CALL
+	DW	HEXIN
+	GLO	8
+	SEX	13
+	ADD
+	STR	13		; Checksum
+
+	GHI	10		; RECTYP
+	BNZ	LHI2
+
+	GLO	8
+	STR	11
+	INC	11
+LHI2:
+	DEC	10
+	GLO	10
+	BNZ	LHI1
+LHI3:
+	SEP	CALL
+	DW	HEXIN
+	GLO	8
+	SEX	13
+	ADD
+	BNZ	LHIE
+
+	GHI	10
+	BZ	LHI4
+	LBR	WSTART
+LHI4:
+	LBR	LH3
+LHIE:
+	LDI	high(IHEMSG)
+	PHI	9
+	LDI	low(IHEMSG)
+	PLO	9
+	SEP	CALL
+	DW	STROUT
+	LBR	WSTART
+
+	;; Motorola S record
+LHS0:
+	SEP	CALL
+	DW	CONIN
+	LDI	0
+	PHI	10
+	GLO	8
+	SMI	'1'
+	BZ	LHS01
+	GLO	8
+	SMI	'9'
+	BZ	LHS00
+	LBR	LH3		; Skip unsupported record type
+LHS00:
+	LDI	1		; RECTYP (end)
+	PHI	10
+LHS01:
+
+	SEP	CALL
+	DW	HEXIN
+	GLO	8
+	PLO	10		; Length + 3
+	STR	13		; Checksum
+
+	SEP	CALL
+	DW	HEXIN
+	GLO	8
+	PHI	11		; Address H
+	SEX	13
+	ADD
+	STR	13		; Checksum
+
+	SEP	CALL
+	DW	HEXIN
+	GLO	8
+	PLO	11		; Address L
+	SEX	13
+	ADD
+	STR	13		; Checksum
+
+	;; Offset
+	SEX	14
+	GLO	11
+	ADD
+	PLO	11
+	DEC	14
+	GHI	11
+	ADC
+	PHI	11
+	INC	14
+
+	DEC	10
+	DEC	10
+	DEC	10
+	GLO	10
+	BZ	LHS3
+LHS1:
+	SEP	CALL
+	DW	HEXIN
+	GLO	8
+	SEX	13
+	ADD
+	STR	13		; Checksum
+
+	GHI	10		; RECTYP
+	BNZ	LHS2
+
+	GLO	8
+	STR	11
+	INC	11
+LHS2:
+	DEC	10
+	GLO	10
+	BNZ	LHS1
+LHS3:
+	SEP	CALL
+	DW	HEXIN
+	GLO	8
+	SEX	13
+	ADD
+	SMI	0FFH
+	BNZ	LHSE
+
+	GHI	10
+	BNZ	LHSR
+	LBR	LH3
+LHSE:
+	LDI	high(SHEMSG)
+	PHI	9
+	LDI	low(SHEMSG)
+	PLO	9
+	SEP	CALL
+	DW	STROUT
+LHSR:
+	LBR	WSTART
+
+;;; Port in
+
+PIN:
+	INC	9
+	SEP	CALL
+	DW	SKIPSP
+	SEP	CALL
+	DW	RDHEX
+	SEP	CALL
+	DW	SKIPSP
+	LDN	9
+	BNZ	PIOE
+	GLO	10
+	BZ	PIOE		; Port address missing
+
+	LDI	high(INBUF)
+	PHI	15
+	PHI	14
+	LDI	low(INBUF)
+	PLO	15
+	PLO	14
+	LDI	0EFH		; SEX 15
+	STR	15
+	INC	15
+	GLO	11
+	ANI	07H
+	BZ	PIOE		; Invalid address 0
+	ORI	68H		; INP
+	STR	15
+	INC	15
+	LDI	0D3H		; SEP PC
+	STR	15
+	INC	15
+	SEP	14
+	LDN	15
+	PLO	8
+	SEP	CALL
+	DW	HEXOUT2
+	SEP	CALL
+	DW	CRLF
+	LBR	WSTART
+
+PIOE:
+	LBR	ERR
+
+;;; Port out
+
+POUT:
+	INC	9
+	SEP	CALL
+	DW	SKIPSP
+	SEP	CALL
+	DW	RDHEX
+	SEP	CALL
+	DW	SKIPSP
+	LDA	9
+	SMI	','
+	BNZ	PIOE
+	GLO	10
+	BZ	PIOE		; Address missing
+	GLO	11
+	PLO	13		; Port address
+	SEP	CALL
+	DW	SKIPSP
+	SEP	CALL
+	DW	RDHEX
+	SEP	CALL
+	DW	SKIPSP
+	LDN	9
+	BNZ	PIOE
+	GLO	10
+	BZ	PIOE		; Data missing
+
+	LDI	high(INBUF)
+	PHI	15
+	PHI	14
+	LDI	low(INBUF)
+	PLO	15
+	PLO	14
+	LDI	0EFH		; SEX 15
+	STR	15
+	INC	15
+	GLO	13		; Address
+	ANI	07H
+	BZ	PIOE		; Invalid address 0
+	ORI	60H		; OUT
+	STR	15
+	INC	15
+	LDI	0D3H		; SEP PC
+	STR	15
+	INC	15
+	GLO	11		; Data
+	STR	15
+	SEP	14
+
+	LBR	WSTART
+
+;;; Other support routines
+
+	ALIGN	256
+
+STROUT:
+	LDA	9
+	BZ	STROR
+	PLO	8
+	SEP	CALL
+	DW	CONOUT
+	BR	STROUT
+STROR:
+	SEP	RETN
+
+HEXOUT2:
+	GLO	8
+	PHI	8
+	SHR
+	SHR
+	SHR
+	SHR
+	PLO	8
+	SEP	CALL
+	DW	HEXOUT1
+	GHI	8
+	PLO	8
+HEXOUT1:
+	GLO	8
+	ANI	0FH
+	ADI	'0'
+	PLO	8
+	SMI	'9'+1
+	BL	HO10
+	GLO	8
+	ADI	'A'-'9'-1
+	PLO	8
+HO10:
+	LBR	CONOUT
+
+HEXIN:
+	LDI	high(TMP1)
+	PHI	15
+	LDI	low(TMP1)
+	PLO	15
+	LDI	0
+	STR	15
+	SEP	CALL
+	DW	HI0
+	LDN	15
+	SHL
+	SHL
+	SHL
+	SHL
+	STR	15
+HI0:
+	SEP	CALL
+	DW	CONIN
+	SEP	CALL
+	DW	UPPER
+	GLO	8
+	SMI	'0'
+	BL	HIR
+	GLO	8
+	SMI	'9'+1
+	BL	HI1
+	GLO	8
+	SMI	'A'
+	BL	HIR
+	GLO	8
+	SMI	'F'+1
+	BGE	HIR
+	GLO	8
+	SMI	'A'-'9'-1
+	PLO	8
+HI1:
+	GLO	8
+	SMI	'0'
+	SEX	15
+	OR
+	STR	15
+HIR:
+	LDN	15
+	PLO	8
+	SEP	RETN
+
+CRLF:
+	LDI	CR
+	PLO	8
+	SEP	CALL
+	DW	CONOUT
+	LDI	LF
+	PLO	8
+	LBR	CONOUT
+
+GETLIN:
+	LDI	high(INBUF)
+	PHI	9
+	LDI	low(INBUF)
+	PLO	9
+	LDI	0
+	PLO	10		; count
+GL0:
+	SEP	CALL
+	DW	CONIN
+	GLO	8
+	SMI	CR
+	BZ	GLE
+	GLO	8
+	SMI	LF
+	BZ	GLE
+	GLO	8
+	SMI	BS
+	BZ	GLB
+	GLO	8
+	SMI	DEL
+	BZ	GLB
+	GLO	8
+	SMI	' '
+	BL	GL0
+	GLO	8
+	SMI	80H
+	BGE	GL0
+	GLO	10
+	SMI	BUFLEN-1
+	BGE	GL0		; Too long
+	INC	10
+	GLO	8
+	STR	9
+	INC	9
+	SEP	CALL
+	DW	CONOUT
+	BR	GL0
+GLB:
+	GLO	10
+	BZ	GL0
+	DEC	10
+	DEC	9
+	LDI	BS
+	PLO	8
+	SEP	CALL
+	DW	CONOUT
+	LDI	' '
+	PLO	8
+	SEP	CALL
+	DW	CONOUT
+	LDI	BS
+	PLO	8
+	SEP	CALL
+	DW	CONOUT
+	BR	GL0
+GLE:
+	SEP	CALL
+	DW	CRLF
+	LDI	0
+	STR	9
+	SEP	RETN
+
+SKIPSP:
+	LDA	9
+	SMI	' '
+	BZ	SKIPSP
+	DEC	9
+	SEP	RETN
+
+UPPER:
+	GLO	8
+	SMI	'a'
+	BL	UPR
+	GLO	8
+	SMI	'z'+1
+	BGE	UPR
+	GLO	8
+	ADI	'A'-'a'
+	PLO	8
+UPR:
+	SEP	RETN
+
+	ALIGN	256
+
+RDHEX:
+	LDI	0
+	PLO	10		; Count
+	PHI	11
+	PLO	11		; Value
+RH0:
+	LDN	9
+	PLO	8
+	SEP	CALL
+	DW	UPPER
+	GLO	8
+	SMI	'0'
+	BL	RHE
+	GLO	8
+	SMI	'9'+1
+	BL	RH1
+	GLO	8
+	SMI	'A'
+	BL	RHE
+	GLO	8
+	SMI	'F'+1
+	BGE	RHE
+	GLO	8
+	ADI	-('A'-'9'-1)
+	PLO	8
+RH1:
+	GLO	8
+	SMI	'0'
+	SHL
+	SHL
+	SHL
+	SHL
+	PLO	8
+	LDI	4
+	PLO	12
+RH2:
+	GLO	8
+	SHL
+	PLO	8
+	GLO	11
+	SHLC
+	PLO	11
+	GHI	11
+	SHLC
+	PHI	11
+	DEC	12
+	GLO	12
+	BNZ	RH2
+	INC	9
+	INC	10
+	BR	RH0
+RHE:
+	SEP	RETN
+
+
+;;; Data area
+
+OPNMSG:	DB	CR,LF,"Universal Monitor COSMAC",CR,LF,00H
+;OPNMSG:	DB	"U",0
+
+PROMPT:	DB	"] ",00H
+;PROMPT:	DB	"@",0
+
+IHEMSG:	DB	"Error ihex",CR,LF,00H
+SHEMSG:	DB	"Error srec",CR,LF,00H
+ERRMSG:	DB	"Error",CR,LF,00H
+
+DSEP0:	DB	" :",00H
+DSEP1:	DB	" : ",00H
+IHEXER:	DB	":00000001FF",CR,LF,00H
+SRECER: DB	"S9030000FC",CR,LF,00H
+
+
+	ALIGN	256
+
+	IF USE_DEV_EMILY
+	INCLUDE	"dev/dev_emily.asm"
+	ENDIF
+
+	IF USE_DEV_SOFT
+	INCLUDE	"dev/dev_soft.asm"
+	ENDIF
+
+	IF USE_DEV_8251
+	INCLUDE	"dev/dev_8251.asm"
+	ENDIF
+
+;;;
+;;; RAM area
+;;;
+
+	ORG	WORK_B
+
+INBUF:	DS	BUFLEN
+DSADDR:	DS	2		; DUMP start address
+DEADDR:	DS	2		; DUMP end address
+GADDR:	DS	2		; GO address
+SADDR:	DS	2		; SET address
+
+TMP1:	DS	1
+CSUM:	DS	1		; Checksum

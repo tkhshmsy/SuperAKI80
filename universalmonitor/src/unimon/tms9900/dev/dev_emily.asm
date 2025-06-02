@@ -1,0 +1,68 @@
+;;;
+;;; 	EMILY Board Console Driver
+;;;
+
+INIT:
+	LI	R0,0
+	MOVB	R0,@SMBASE+1
+	MOVB	R0,@SMBASE+2	; Command
+
+	LI	R0,0A500H
+	MOVB	R0,@SMBASE	; Signature
+
+	LI	R0,0CC00H
+	MOVB	R0,@SMBASE+1	; Handshake
+
+	RT
+	
+CONIN:
+	LI	R0,0CC00H
+	CB	R0,@SMBASE+1	; Handshake
+	JEQ	CONIN
+
+	LI	R0,0200H
+	MOVB	R0,@SMBASE+2	; Command
+
+	LI	R0,0CC00H
+	MOVB	R0,@SMBASE+1
+CI0:
+	CB	R0,@SMBASE+1	; Handshake
+	JEQ	CI0
+
+	MOVB	@SMBASE+4,R0	; Data[0]
+
+	RT
+	
+CONST:
+	LI	R0,0CC00H
+	CB	R0,@SMBASE+1	; Handshake
+	JEQ	CONST
+
+	LI	R0,0300H
+	MOVB	R0,@SMBASE+2	; Command
+
+	LI	R0,0CC00H
+	MOVB	R0,@SMBASE+1
+CS0:
+	CB	R0,@SMBASE+1	; Handshake
+	JEQ	CS0
+
+	MOVB	@SMBASE+4,R0	; Data[0]
+
+	RT
+	
+CONOUT:
+	LI	R1,0CC00H
+	CB	@SMBASE+1,R1	; Handshake
+	JEQ	CONOUT
+
+	LI	R1,0100H
+	MOVB	R1,@SMBASE+2	; Command
+
+	MOVB	R0,@SMBASE+4	; Data[0]
+
+	LI	R1,0CC00H
+	MOVB	R1,@SMBASE+1	; Handshake
+
+	RT
+

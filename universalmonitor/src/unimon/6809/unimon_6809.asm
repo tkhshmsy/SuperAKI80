@@ -1,0 +1,1375 @@
+;;;
+;;; Universal Monitor 6809
+;;; 
+
+	CPU	6809
+
+TARGET:	equ	"MC6809"
+
+	INCLUDE	"config.inc"
+
+	INCLUDE	"../common.inc"
+	
+;;;
+;;; ROM area
+;;;
+	
+	ORG	ROM_B
+
+CSTART:
+	IF USE_SPINIT
+	SPINIT
+	ENDIF
+	
+	IF USE_WARMUP
+	;; DRAM warming up
+	LDX	#0
+RESET1:	LDA	,X+		; DRAM WARMING UP
+	CMPX	#$0800
+	BNE	RESET1
+	ENDIF
+
+	LDS	#STACK
+	LBSR	INIT
+
+	LDX	#$0000
+	STX	DSADDR
+	STX	SADDR
+	STX	GADDR
+	LDA	#'S'
+	STA	HEXMOD
+	CLR	PSPEC
+
+	IF USE_REGCMD
+	LDD	#$0000
+	STD	REGA
+	STD	REGE
+	STD	REGX
+	STD	REGY
+	STD	REGU
+	STD	REGPC	
+	STD	REGV
+	LDB	#$80
+	STD	REGDP		; DP & CC
+	STS	REGS
+	ENDIF			; USE_REGCMD
+	STA	REGMD
+	
+	;; Opening message
+	LDX	#OPNMSG
+	LBSR	STROUT
+
+	IF USE_IDENT
+	PSHS	D
+	FDB	$1043		; COMD on HD6309, COMA on MC6809
+	CMPB	1,S
+	PULS	D
+	BNE	ID_6309
+	;; MC6809
+	LDX	#IM6809
+	CLRA
+	BRA	IDE
+	;; HD6309
+ID_6309:
+	IF USE_NATIVE
+	FCB	$11,$3D,$01	; LDMD $01 (HD6309 only)
+	LDA	#$01
+	STA	REGMD
+	ENDIF			; USE_NATIVE
+	LDX	#IM6309
+	LDA	#$01
+IDE:
+	STA	PSPEC
+	LBSR	STROUT
+	ENDIF
+	
+WSTART:
+	LDX	#PROMPT
+	LBSR	STROUT
+	LBSR	GETLIN
+	LDX	#INBUF
+	LBSR	SKIPSP
+	LBSR	UPPER
+	TSTA
+	BEQ	WSTART
+	CMPA	#'D'
+	BEQ	DUMP
+	CMPA	#'G'
+	LBEQ	GO
+	CMPA	#'S'
+	LBEQ	SETM
+
+	CMPA	#'L'
+	LBEQ	LOADH
+	CMPA	#'P'
+	LBEQ	SAVEH
+
+	CMPA	#'I'
+	LBEQ	PIN
+	CMPA	#'O'
+	LBEQ	POUT
+	
+	IF USE_REGCMD
+	CMPA	#'R'
+	LBEQ	REG
+	ENDIF			; USE_REGCMD
+
+	CMPA	#'Z'
+	LBEQ	ZMD
+
+ERR:
+	LDX	#ERRMSG
+	LBSR	STROUT
+	BRA	WSTART
+
+;;;
+;;; Dump memory
+;;;
+DUMP:
+	LEAX	1,X
+	LBSR	SKIPSP
+	LBSR	RDHEX
+	TSTB
+	BNE	DP0
+
+	;; No arg.
+	LBSR	SKIPSP
+	LDA	,X
+	TSTA
+	BNE	ERR
+	LDY	DSADDR
+	LEAY	128,Y
+	STY	DEADDR
+	BRA	DPM
+
+	;; 1st arg. found
+DP0:
+	STY	DSADDR
+	LBSR	SKIPSP
+	LDA	,X
+	CMPA	#','
+	BEQ	DP1
+	TSTA
+	BNE	ERR
+	;; No 2nd arg.
+	LEAY	128,Y
+	STY	DEADDR
+	BRA	DPM
+DP1:
+	LEAX	1,X
+	LBSR	SKIPSP
+	LBSR	RDHEX
+	LBSR	SKIPSP
+	TSTB
+	BEQ	ERR
+	TST	,X
+	BNE	ERR
+	LEAY	1,Y
+	STY	DEADDR
+	
+	;; DUMP main
+DPM:
+	LDD	DSADDR
+	ANDB	#$F0
+	CLR	DSTATE
+	TFR	D,X
+DPM0:
+	PSHS	X
+	BSR	DPL
+	PULS	X
+	LEAX	16,X
+	LBSR	CONST
+	BNE	DPM1
+	LDA	DSTATE
+	CMPA	#2
+	BCS	DPM0
+	LDX	DEADDR
+	STX	DSADDR
+	LBRA	WSTART
+DPM1:
+	STX	DSADDR
+	LBSR	CONIN
+	LBRA	WSTART
+
+	;; Dump line
+DPL:
+	TFR	X,D
+	LBSR	HEXOUT4
+	PSHS	X
+	LDX	#DSEP0
+	LBSR	STROUT
+	PULS	X
+	LDY	#ASCBUF
+	LDB	#16
+DPL0:
+	BSR	DPB
+	DECB
+	BNE	DPL0
+
+	LDX	#DSEP1
+	LBSR	STROUT
+
+	;; Print ASCII area
+	LDX	#ASCBUF
+	LDB	#16
+DPL1:
+	LDA	,X+
+	CMPA	#' '
+	BCS	DPL2
+	CMPA	#$7F
+	BCC	DPL2
+	LBSR	CONOUT
+	BRA	DPL3
+DPL2:
+	LDA	#'.'
+	LBSR	CONOUT
+DPL3:
+	DECB
+	BNE	DPL1
+	LBRA	CRLF
+
+	;; Dump byte
+DPB:
+	LDA	#' '
+	LBSR	CONOUT
+	LDA	DSTATE
+	TSTA
+	BNE	DPB2
+	;; Dump state 0
+	CMPX	DSADDR
+	BEQ	DPB1
+	;; Still 0 or 2
+DPB0:
+	LDA	#' '
+	LBSR	CONOUT
+	LBSR	CONOUT
+	STA	,Y+
+	LEAX	1,X
+	RTS
+	;; Found start address
+DPB1:	
+	LDA	#1
+	STA	DSTATE
+DPB2:
+	LDA	DSTATE
+	CMPA	#1
+	BNE	DPB0
+	;; Dump state 1
+	LDA	,X+
+	STA	,Y+
+	LBSR	HEXOUT2
+	CMPX	DEADDR
+	BNE	DPBE
+	;; Found end address
+	LDA	#2
+	STA	DSTATE
+DPBE:
+	RTS
+
+;;;
+;;; Go address
+;;;
+GO:
+	LEAX	1,X
+	LBSR	SKIPSP
+	LBSR	RDHEX
+	LDA	,X
+	LBNE	ERR
+	TSTB
+	BEQ	G0
+	IF USE_REGCMD
+	STY	REGPC
+G0:
+	LDS	REGS
+
+	LDA	PSPEC
+	ANDA	#$01
+	BEQ	G1
+	LDD	REGV
+	FCB	$1F,$07		; TFR D,V (HD6309 only)
+G1:
+	LDD	REGPC
+	PSHS	D		; PC
+	LDD	REGU
+	PSHS	D		; U
+	LDD	REGY
+	PSHS	D		; Y
+	LDD	REGX
+	PSHS	D		; X
+	LDA	REGDP
+	PSHS	A		; DP
+
+	LDA	PSPEC
+	ANDA	#$01
+	BEQ	G2
+	LDA	REGMD
+	ANDA	#$01		; Native bit
+	BEQ	G10
+	;; Native mode
+	LDD	REGE
+	PSHS	D		; W (E:F)
+	BRA	G2
+G10:
+	;; Emulation mode
+	LDD	REGE
+	FCB	$1F,$06		; TFR D,W (HD6309 only)
+G2:	
+	LDD	REGA
+	PSHS	D		; D (A:B)
+	LDA	REGCC
+	ORA	#$80		; Set E flag
+	PSHS	A		; CC
+	RTI
+	ELSE			; !USE_REGCMD
+	STY	GADDR
+G0:
+	LDX	GADDR
+	JMP	,X
+	ENDIF			; USE_REGCMD
+
+;;;
+;;; Set memory
+;;;
+SETM:
+	LEAX	1,X
+	LBSR	SKIPSP
+	LBSR	RDHEX
+	LBSR	SKIPSP
+	LDA	,X
+	LBNE	ERR
+	TSTB
+	BNE	SM0
+	LDY	SADDR
+SM0:
+SM1:
+	TFR	Y,D
+	LBSR	HEXOUT4
+	LDX	#DSEP1
+	LBSR	STROUT
+	LDA	,Y
+	LBSR	HEXOUT2
+	LDA	#' '
+	LBSR	CONOUT
+	LBSR	GETLIN
+	LDX	#INBUF
+	LBSR	SKIPSP
+	LDA	,X
+	BNE	SM2
+	;; Empty (Increment address)
+	LEAY	1,Y
+	STY	SADDR
+	BRA	SM1
+SM2:
+	CMPA	#'-'
+	BNE	SM3
+	;; '-' (Decrement address)
+	LEAY	-1,Y
+	STY	SADDR
+	BRA	SM1
+SM3:
+	CMPA	#'.'
+	BNE	SM4
+	;; '.' (Quit)
+	STY	SADDR
+	LBRA	WSTART
+SM4:
+	PSHS	Y
+	LBSR	RDHEX
+	TSTB
+	LBEQ	ERR
+	TFR	Y,D
+	PULS	Y
+	STB	,Y+
+	STY	SADDR
+	BRA	SM1
+
+;;;
+;;; LOAD HEX file
+;;;
+LOADH:
+	LEAX	1,X
+	LBSR	SKIPSP
+	LBSR	RDHEX
+	LBSR	SKIPSP
+	TST	,X
+	LBNE	ERR
+LH0:
+	LBSR	CONIN
+	LBSR	UPPER
+	CMPA	#'S'
+	BEQ	LHS0
+LH1:
+	CMPA	#':'
+	BEQ	LHI0
+LH2:
+	;; Skip to EOL
+	CMPA	#CR
+	BEQ	LH0
+	CMPA	#LF
+	BEQ	LH0
+LH3:
+	LBSR	CONIN
+	BRA	LH2
+
+LHI0:
+	LBSR	HEXIN
+	STA	CKSUM
+	PSHS	A		; Length
+
+	LBSR	HEXIN
+	STA	DMPPT		; Address H
+	ADDA	CKSUM
+	STA	CKSUM
+
+	LBSR	HEXIN
+	STA	DMPPT+1		; Address L
+	ADDA	CKSUM
+	STA	CKSUM
+
+	;; Add offset
+	TFR	Y,D
+	ADDD	DMPPT
+	TFR	D,X		; X = Address + Offset
+
+	LBSR	HEXIN
+	STA	RECTYP		; Record type
+	ADDA	CKSUM
+	STA	CKSUM
+
+	PULS	B
+	TSTB
+	BEQ	LHI3
+LHI1:
+	LBSR	HEXIN
+	PSHS	A
+	ADDA	CKSUM
+	STA	CKSUM
+	PULS	A
+
+	TST	RECTYP
+	BNE	LHI2
+
+	STA	,X+
+LHI2:
+	DECB
+	BNE	LHI1
+LHI3:
+	LBSR	HEXIN
+	ADDA	CKSUM
+	BNE	LHIE		; Checksum error
+	TST	RECTYP
+	BEQ	LH3
+	JMP	WSTART
+LHIE:
+	LDX	#IHEMSG
+	LBSR	STROUT
+	JMP	WSTART
+	
+LHS0:
+	LBSR	CONIN
+	STA	RECTYP		; Record type
+
+	LBSR	HEXIN
+	PSHS	A		; Length+3
+	STA	CKSUM
+
+	LBSR	HEXIN
+	STA	DMPPT		; Address H
+	ADDA	CKSUM
+	STA	CKSUM
+	
+	LBSR	HEXIN
+	STA	DMPPT+1		; Address L
+	ADDA	CKSUM
+	STA	CKSUM
+	
+	;; Add offset
+	TFR	Y,D
+	ADDD	DMPPT
+	TFR	D,X		; X = Address + Offset
+
+	PULS	B
+	SUBB	#3
+	BEQ	LHS3
+LHS1:
+	LBSR	HEXIN
+	PSHS	A
+	ADDA	CKSUM
+	STA	CKSUM		; Checksum
+
+	LDA	RECTYP
+	CMPA	#'1'
+	BNE	LHS2
+
+	PULS	A
+	STA	,X+
+	BRA	LHS20
+LHS2:
+	PULS	A
+LHS20:
+	DECB
+	BNE	LHS1
+LHS3:
+	LBSR	HEXIN
+	ADDA	CKSUM
+	CMPA	#$FF
+	BNE	LHSE		; Checksum error
+
+	LDA	RECTYP
+	CMPA	#'7'
+	BEQ	LHSR
+	CMPA	#'8'
+	BEQ	LHSR
+	CMPA	#'9'
+	BEQ	LHSR
+	JMP	LH3
+LHSE:
+	LDX	#SHEMSG
+	LBSR	STROUT
+LHSR:
+	JMP	WSTART
+	
+;;;
+;;; SAVE HEX file
+;;;
+SAVEH:
+	LEAX	1,X
+	LDA	,X
+	LBSR	UPPER
+	CMPA	#'I'
+	BEQ	SH0
+	CMPA	#'S'
+	BNE	SH1
+SH0:
+	LEAX	1,X
+	STA	HEXMOD
+SH1:
+	LBSR	SKIPSP
+	LBSR	RDHEX
+	TSTB
+	BEQ	SHE
+	STY	DMPPT		; (DMPPT) = Start address
+	LBSR	SKIPSP
+	LDA	,X
+	CMPA	#','
+	BNE	SHE
+	LEAX	1,X
+	LBSR	SKIPSP
+	LBSR	RDHEX		; Y = End address
+	TSTB
+	BEQ	SHE
+	LBSR	SKIPSP
+	TST	,X
+	BEQ	SH2
+SHE:
+	JMP	ERR
+
+SH2:
+	LEAY	1,Y
+	TFR	Y,D
+	SUBD	DMPPT
+	LDX	DMPPT		; X = Start address
+	STD	DMPPT		; (DMPPT) = Length
+SH3:
+	BSR	SHL
+	LDA	DMPPT
+	ORA	DMPPT+1
+	BNE	SH3
+
+	LDA	HEXMOD
+	CMPA	#'I'
+	BNE	SH4
+	;; End record for Intel HEX
+	LDX	#IHEXER
+	LBSR	STROUT
+	JMP	WSTART
+SH4:	
+	;; End record for Motorola S record
+	LDX	#SRECER
+	LBSR	STROUT
+	JMP	WSTART
+	
+SHL:	
+	LDB	#16
+	TST	DMPPT		; Length H
+	BNE	SHL0
+	LDA	DMPPT+1		; Length L
+	PSHS	B		;
+	CMPA	,S+		; (A - B)
+	BCC	SHL0
+	TFR	A,B
+SHL0:
+	LDA	DMPPT+1
+	PSHS	B
+	SUBA	,S+
+	STA	DMPPT+1
+	LDA	DMPPT
+	SBCA	#0
+	STA	DMPPT		; (DMPPT) -= B
+
+	LDA	HEXMOD
+	CMPA	#'I'
+	BNE	SHLS
+
+SHLI:
+	;;  Intel HEX
+	LDA	#':'
+	LBSR	CONOUT
+
+	TFR	B,A
+	LBSR	HEXOUT2		; Length
+	STB	CKSUM
+
+	PSHS	X
+	LDA	,S
+	LBSR	HEXOUT2		; Address H
+	LDA	,S+
+	ADDA	CKSUM
+	STA	CKSUM
+
+	LDA	,S
+	LBSR	HEXOUT2		; Address L
+	LDA	,S+
+	ADDA	CKSUM
+	STA	CKSUM
+
+	CLRA
+	LBSR	HEXOUT2		; Record type
+SHLI0:
+	LDA	,X+
+	PSHS	A
+	LBSR	HEXOUT2		; Data
+	PULS	A
+	ADDA	CKSUM
+	STA	CKSUM
+
+	DECB
+	BNE	SHLI0
+
+	LDA	CKSUM
+	NEGA
+	LBSR	HEXOUT2
+	JMP	CRLF
+	
+SHLS:
+	;; Motorola S record
+	LDA	#'S'
+	LBSR	CONOUT
+	LDA	#'1'
+	LBSR	CONOUT
+
+	TFR	B,A
+	ADDA	#2+1		; DataLength + 2(Addr) + 1(Sum)
+	STA	CKSUM
+	LBSR	HEXOUT2
+
+	PSHS	X
+	LDA	,S
+	LBSR	HEXOUT2		; Address H
+	LDA	,S+
+	ADDA	CKSUM
+	STA	CKSUM
+
+	LDA	,S
+	LBSR	HEXOUT2		; Address L
+	LDA	,S+
+	ADDA	CKSUM
+	STA	CKSUM
+SHLS0:
+	LDA	,X+
+	PSHS	A
+	LBSR	HEXOUT2		; Data
+	PULS	A
+	ADDA	CKSUM
+	STA	CKSUM
+
+	DECB
+	BNE	SHLS0
+
+	LDA	CKSUM
+	COMA
+	LBSR	HEXOUT2		; Checksum
+	JMP	CRLF
+
+;;;
+;;; Port in
+;;;
+PIN:
+	LEAX	1,X
+	LBSR	SKIPSP
+	LBSR	RDHEX
+	TSTB
+	LBEQ	ERR		; Port address missing
+	LBSR	SKIPSP
+	TST	,X
+	LBNE	ERR
+
+	LDA	,Y
+	LBSR	HEXOUT2
+	LBSR	CRLF
+	LBRA	WSTART
+	
+;;;
+;;; Port out
+;;;
+POUT:
+	LEAX	1,X
+	LBSR	SKIPSP
+	LBSR	RDHEX
+	TSTB
+	LBEQ	ERR		; Port address missing
+	STY	DMPPT
+	LBSR	SKIPSP
+	LDA	,X+
+	CMPA	#','
+	LBNE	ERR
+	LBSR	SKIPSP
+	LBSR	RDHEX
+	TSTB
+	LBEQ	ERR		; Data missing
+	LBSR	SKIPSP
+	TST	,X
+	LBNE	ERR
+
+	LDX	DMPPT
+	TFR	Y,D		; B=(Data)
+	STB	,X
+	LBRA	WSTART
+
+;;;
+;;; Register
+;;;
+	IF USE_REGCMD
+REG:
+	LEAX	1,X
+	LBSR	SKIPSP
+	LBSR	UPPER
+	CMPA	#0
+	BNE	RG0
+	LBSR	RDUMP
+	LBRA	WSTART
+RG0:
+	LDY	#RNTAB
+RG1:	
+	CMPA	,Y
+	BEQ	RG2
+	LDB	1,Y
+	LBEQ	ERR
+	LEAY	6,Y
+	BRA	RG1
+RG2:
+	LDA	1,Y
+	CMPA	#$0F
+	BNE	RG3
+	;; Next table
+	LDY	2,Y
+	LEAX	1,X
+	LDA	,X
+	LBSR	UPPER
+	BRA	RG1
+RG3:
+	CMPA	#0		; Found end mark
+	LBEQ	ERR
+
+	LDB	1,Y		; Register size
+	LDA	PSPEC
+	BITB	#$80
+	BEQ	RG30
+	BITA	#$01
+	LBEQ	ERR		; Register not supported by MC6809
+RG30:
+	LDX	4,Y
+	LBSR	STROUT
+	LDA	#'='
+	LBSR	CONOUT
+	LDX	2,Y
+	ANDB	#$07
+	PSHS	B,X
+	CMPB	#1
+	BNE	RG4
+	;; 8 bit register
+	LDA	,X
+	LBSR	HEXOUT2
+	BRA	RG5
+RG4:
+	;; 16 bit register
+	LDD	,X
+	LBSR	HEXOUT4
+RG5:
+	LDA	#' '
+	LBSR	CONOUT
+	LBSR	GETLIN
+	LDX	#INBUF
+	LBSR	RDHEX
+	TSTB
+	BEQ	RGR
+	PULS	B,X
+	CMPB	#1
+	BNE	RG6
+	;; 8 bit register
+	TFR	Y,D
+	STB	,X
+	BRA	RG7
+RG6:
+	;; 16 bit register
+	TFR	Y,D
+	STD	,X
+RG7:
+RGR:
+	LBRA	WSTART
+	
+RDUMP:	
+	LDX	#RDSA
+	LBSR	STROUT
+	LDA	REGA
+	LBSR	HEXOUT2
+
+	LDX	#RDSB
+	LBSR	STROUT
+	LDA	REGB
+	LBSR	HEXOUT2
+
+	LDA	PSPEC
+	ANDA	#$01
+	BEQ	RD0
+	
+	LDX	#RDSE
+	LBSR	STROUT
+	LDA	REGE
+	LBSR	HEXOUT2
+
+	LDX	#RDSF
+	LBSR	STROUT
+	LDA	REGF
+	LBSR	HEXOUT2
+RD0:
+	LDX	#RDSX
+	LBSR	STROUT
+	LDD	REGX
+	LBSR	HEXOUT4
+
+	LDX	#RDSY
+	LBSR	STROUT
+	LDD	REGY
+	LBSR	HEXOUT4
+
+	LDX	#RDSU
+	LBSR	STROUT
+	LDD	REGU
+	LBSR	HEXOUT4
+
+	LDX	#RDSS
+	LBSR	STROUT
+	LDD	REGS
+	LBSR	HEXOUT4
+
+	LDX	#RDSPC
+	LBSR	STROUT
+	LDD	REGPC
+	LBSR	HEXOUT4
+
+	LDA	PSPEC
+	ANDA	#$01
+	BEQ	RD1
+	
+	LDX	#RDSV
+	LBSR	STROUT
+	LDD	REGV
+	LBSR	HEXOUT4
+RD1:	
+	LDX	#RDSDP
+	LBSR	STROUT
+	LDA	REGDP
+	LBSR	HEXOUT2
+
+	LDX	#RDSCC
+	LBSR	STROUT
+	LDA	REGCC
+	LBSR	HEXOUT2
+
+	LBRA	CRLF
+	ENDIF			; USE_REGCMD
+
+;;;
+;;; Z MD access
+;;;
+ZMD:
+	LEAX	1,X
+	LBSR	SKIPSP
+	CMPA	#0
+	BNE	ZM0
+	LDA	REGMD
+	LBSR	HEXOUT2
+	LBSR	CRLF
+	LBRA	WSTART
+ZM0:
+	LBSR	RDHEX
+	TSTB
+	LBEQ	ERR
+	TFR	Y,D
+	CMPB	#4
+	LBCC	ERR
+	STB	REGMD
+	LDX	#INBUF
+	LDA	#$11		; OPCODE(1st) of LDMD
+	STA	,X+
+	LDA	#$3D		; OPCODE(2nd) of LDMD
+	STA	,X+
+	STB	,X+
+	LDA	#$39		; OPCODE of RTS
+	STA	,X+
+	LBSR	INBUF
+	LBRA	WSTART
+
+;;;
+;;; Other support routines
+;;;
+	
+STROUT:
+	LDA	,X+
+	BEQ	STROE
+	JSR	CONOUT
+	BRA	STROUT
+STROE:
+	RTS
+
+HEXOUT4:
+	BSR	HEXOUT2		; High
+	TFR	B,A		; Low
+HEXOUT2:
+	PSHS	A
+	LSRA
+	LSRA
+	LSRA
+	LSRA
+	BSR	HEXOUT1
+	PULS	A
+HEXOUT1:
+	ANDA	#$0F
+	ADDA	#'0'
+	CMPA	#'9'+1
+	BCS	HEXOUTE
+	ADDA	#'A'-'9'-1
+HEXOUTE:	
+	JMP	CONOUT
+
+HEXIN:
+	CLRA
+	BSR	HI0
+	ASLA
+	ASLA
+	ASLA
+	ASLA
+HI0:
+	PSHS	A
+	LBSR	CONIN
+	LBSR	UPPER
+	CMPA	#'0'
+	BCS	HIR
+	CMPA	#'9'+1
+	BCS	HI1
+	CMPA	#'A'
+	BCS	HIR
+	CMPA	#'F'+1
+	BCC	HIR
+	SUBA	#'A'-'9'-1
+HI1:
+	SUBA	#'0'
+	ADDA	,S+
+	RTS
+HIR:
+	PULS	A		; return value undefined for non-HEX character
+	RTS
+	
+CRLF:
+	LDA	#CR
+	JSR	CONOUT
+	LDA	#LF
+	JMP	CONOUT
+
+GETLIN:
+	LDX	#INBUF
+	CLRB
+GL0:
+	JSR	CONIN
+	CMPA	#CR
+	BEQ	GLE
+	CMPA	#LF
+	BEQ	GLE
+	CMPA	#BS
+	BEQ	GLB
+	CMPA	#DEL
+	BEQ	GLB
+	CMPA	#' '
+	BCS	GL0
+	CMPA	#$80
+	BCC	GL0
+	CMPB	#BUFLEN-1
+	BCC	GL0		; Too long
+	INCB
+	STA	,X+
+	JSR	CONOUT
+	BRA	GL0
+GLB:	
+	TSTB
+	BEQ	GL0
+	DECB
+	LEAX	-1,X
+	LDA	#$08
+	LBSR	CONOUT
+	LDA	#' '
+	LBSR	CONOUT
+	LDA	#$08
+	LBSR	CONOUT
+	BRA	GL0
+GLE:
+	BSR	CRLF
+	CLR	0,X
+	RTS
+
+SKIPSP:
+	LDA	,X+
+	CMPA	#' '
+	BNE	SSE
+	BRA	SKIPSP
+SSE:
+	LEAX	-1,X
+	RTS
+
+UPPER:
+	CMPA	#'a'
+	BCS	UPE
+	CMPA	#'z'+1
+	BCC	UPE
+	ADDA	#'A'-'a'
+UPE:
+	RTS
+
+RDHEX:
+	CLRB
+	LDY	#0
+RH0:
+	LDA	,X
+	BSR	UPPER
+	CMPA	#'0'
+	BCS	RHE
+	CMPA	#'9'+1
+	BCS	RH1
+	CMPA	#'A'
+	BCS	RHE
+	CMPA	#'F'+1
+	BCC	RHE
+	SUBA	#'A'-'9'-1
+RH1:
+	SUBA	#'0'
+	EXG	D,Y
+	ASLB
+	ROLA
+	ASLB
+	ROLA
+	ASLB
+	ROLA
+	ASLB
+	ROLA
+	EXG	Y,D
+	LEAY	A,Y
+	LEAX	1,X
+	INCB
+	BRA	RH0
+RHE:
+	RTS
+
+;;;
+;;; SWI Handler
+;;;
+SWIH:
+	IF USE_REGCMD
+	LDX	#SWIMSG
+	LBSR	STROUT
+SWI0:
+	PULS	A		; CC
+	STA	REGCC
+	PULS	D		; D (A:B)
+	STD	REGA
+
+	LDA	PSPEC
+	ANDA	#$01
+	BEQ	SWI1
+
+	LDA	REGMD
+	ANDA	#$01		; Native bit
+	BEQ	SWI00
+	;; Native mode
+	PULS	D		; W (E:F)
+	BRA	SWI01
+SWI00:
+	;; Emulation mode
+	FCB	$1F,$60		; TFR W,D (HD6309 only)
+SWI01:	
+	STD	REGE
+SWI1:
+	PULS	A		; DP
+	STA	REGDP
+	PULS	D		; X
+	STD	REGX
+	PULS	D		; Y
+	STD	REGY
+	PULS	D		; U
+	STD	REGU
+	PULS	D		; PC
+	SUBD	#1
+	STD	REGPC
+	STS	REGS
+
+	LDA	PSPEC
+	ANDA	#$01
+	BEQ	SWI4
+
+	FCB	$1F,$70		; TFR V,D (HD6309 only)
+	STD	REGV
+SWI4:
+	LBSR	RDUMP
+	LBRA	WSTART
+	ELSE			; !USE_REGCMD
+	;; Dummy
+	RTI
+	ENDIF			; USE_REGCMD
+
+;;;
+;;; TRAP Handler (HD6309 only)
+;;;
+TRAPH:
+	IF USE_REGCMD
+	FCB	$11,$3C,$80	; TSTMD $80 (HD6309 only)
+	BEQ	TRAP0
+	LDX	#DVZMSG
+	BRA	TRAP1
+TRAP0:
+	LDX	#UNIMSG
+TRAP1:
+	LBSR	STROUT
+	BRA	SWI0
+	ELSE			; !USE_REGCMD
+	;; Dummy
+	RTI
+	ENDIF			; USE_REGCMD
+
+;;;
+;;; Strings
+;;;
+	
+OPNMSG:
+	DC	CR,LF,"Universal Monitor 6809",CR,LF,$00
+
+PROMPT:
+	DC	"] ",$00
+
+IHEMSG:
+	DC	"Error ihex",CR,LF,$00
+
+SHEMSG:
+	DC	"Error srec",CR,LF,$00
+
+ERRMSG:
+	DC	"Error",CR,LF,$00
+
+DSEP0:
+	DC	" :",$00
+DSEP1:
+	DC	" : ",$00
+IHEXER:
+        DC	":00000001FF",CR,LF,$00
+SRECER:
+        DC	"S9030000FC",CR,LF,$00
+
+	IF USE_IDENT
+IM6809:
+	DC	"MC6809",CR,LF,$00
+IM6309:
+	DC	"HD6309",CR,LF,$00
+	ENDIF			; USE_IDENT
+
+	IF USE_REGCMD
+
+SWIMSG:	FCB	"SWI",CR,LF,$00
+DVZMSG:	FCB	"Division by zero",CR,LF,$00
+UNIMSG:	FCB	"Illegal instruction",CR,LF,$00
+
+RDSA:	FCB	"A=",$00
+RDSB:	FCB	" B=",$00
+RDSE:	FCB	" E=",$00
+RDSF:	FCB	" F=",$00
+RDSX:	FCB	" X=",$00
+RDSY:	FCB	" Y=",$00
+RDSU:	FCB	" U=",$00
+RDSS:	FCB	" S=",$00
+RDSPC:	FCB	CR,LF,"PC=",$00
+RDSV:	FCB	" V=",$00
+RDSDP:	FCB	" DP=",$00
+RDSCC:	FCB	" CC=",$00
+
+RNTAB:
+	FCB	'A',1		; "A"
+	FDB	REGA,RNA
+	FCB	'B',1		; "B"
+	FDB	REGB,RNB
+	FCB	'C',$0F		; "C?"
+	FDB	RNTABC,0
+	FCB	'D',$0F		; "D?"
+	FDB	RNTABD,0
+	FCB	'E',$81		; "E"
+	FDB	REGE,RNE
+	FCB	'F',$81		; "F"
+	FDB	REGF,RNF
+	FCB	'W',$82		; "W"
+	FDB	REGE,RNW
+	FCB	'X',2		; "X"
+	FDB	REGX,RNX
+	FCB	'Y',2		; "Y"
+	FDB	REGY,RNY
+	FCB	'U',2		; "U"
+	FDB	REGU,RNU
+	FCB	'S',2		; "S"
+	FDB	REGS,RNS
+	FCB	'P',$0F		; "P?"
+	FDB	RNTABP,0	
+	FCB	'V',$82		; "V"
+	FDB	REGV,RNV
+	
+	FCB	$00,0		; End mark
+	FDB	0,0
+
+RNTABC:
+	FCB	$00,1		; "C"
+	FDB	REGCC,RNCC
+	FCB	'C',1		; "CC"
+	FDB	REGCC,RNCC
+
+	FCB	$00,0		; End mark
+	FDB	0,0
+
+RNTABD:
+	FCB	$00,2		; "D"
+	FDB	REGA,RND
+	FCB	'P',1		; "DP"
+	FDB	REGDP,RNDP
+
+	FCB	$00,0		; End mark
+	FDB	0,0
+
+RNTABP:
+	FCB	'C',2		; "PC"
+	FDB	REGPC,RNPC
+
+	FCB	$00,0		; End mark
+	FDB	0,0
+
+RNA:	FCB	"A",$00
+RNB:	FCB	"B",$00
+RND:	FCB	"D",$00
+RNE:	FCB	"E",$00
+RNF:	FCB	"F",$00
+RNW:	FCB	"W",$00
+RNX:	FCB	"X",$00
+RNY:	FCB	"Y",$00
+RNU:	FCB	"U",$00
+RNS:	FCB	"S",$00
+RNPC:	FCB	"PC",$00
+RNV:	FCB	"V",$00
+RNDP:	FCB	"DP",$00
+RNCC:	FCB	"CC",$00
+
+	ENDIF			; USE_REGCMD
+
+	IF USE_DEV_6850
+	INCLUDE	"dev/dev_6850.asm"
+	ENDIF
+
+	;;
+	;; Entry point
+	;;
+
+	ORG	ENTRY+0		; Cold start
+E_CSTART:
+	JMP	CSTART
+
+	ORG	ENTRY+8		; Warm start
+E_WSTART:
+	JMP	WSTART
+
+	ORG	ENTRY+16	; Console output
+E_CONOUT:
+	JMP	CONOUT
+
+	ORG	ENTRY+24	; (Console) String output
+E_STROUT:
+	JMP	STROUT
+
+	ORG	ENTRY+32	; Console input
+E_CONIN:
+	JMP	CONIN
+
+	ORG	ENTRY+40	; Console status
+E_CONST:
+	JMP	CONST
+	
+	;;
+	;; Vector Area
+	;;
+
+	ORG	$FFF0
+
+	FDB	TRAPH		; TRAP (HD6309 only)
+
+	FDB	$0000		; SWI3
+
+	FDB	$0000		; SWI2
+
+	FDB	$0000		; FIRQ
+	
+	DC.W	$0000		; IRQ
+
+	DC.W	SWIH		; SWI
+
+	DC.W	$0000		; NMI
+
+	DC.W	CSTART		; RESET
+
+	;;
+	;; Work Area
+	;;
+
+	ORG	WORK_B
+	
+INBUF:	DS	BUFLEN		; Line input buffer
+DSADDR:	DS	2		; Dump start address
+DEADDR:	DS	2		; Dump end address
+ASCBUF:	DS	16		; Buffer for ASCII dump
+DSTATE:	DS	1		; Dump state
+GADDR:	DS	2		; Go address
+SADDR:	DS	2		; Set address
+HEXMOD:	DS	1		; HEX file mode
+RECTYP:	DS	1		; Record type
+PSPEC:	DS	1		; Processor spec.
+
+	IF USE_REGCMD
+REGA:	RMB	1		; Accumulator A
+REGB:	RMB	1		; Accumulator B
+REGE:	RMB	1		; Accumulator E (HD6309 only)
+REGF:	RMB	1		; Accumulator F (HD6309 only)
+REGX:	RMB	2		; Index register X
+REGY:	RMB	2		; Index register Y
+REGU:	RMB	2		; User stack pointer U
+REGS:	RMB	2		; System stack pointer S
+REGPC:	RMB	2		; Program counter PC
+REGV:	RMB	2		; Register V (HD6309 only)
+REGDP:	RMB	1		; Direct page register DP
+REGCC:	RMB	1		; Condition code register CC
+	ENDIF			; USE_REGCMD
+REGMD:	RMB	1		; MD register
+	
+DMPPT:	DS	2
+CKSUM:	DS	1		; Checksum
+
+	END
+	

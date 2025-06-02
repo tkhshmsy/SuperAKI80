@@ -1,0 +1,62 @@
+;;;
+;;;	NEC uPD7810 Serial I/O Console Driver
+;;;
+
+INIT:
+	MVI	A,SMH_V & 0F3H
+	MOV	SMH,A
+	MVI	A,SML_V
+	MOV	SML,A
+
+	IF USE_TIMER
+	MVI	A,TM0_V
+	MOV	TM0,A
+	MVI	A,TMM_V
+	MOV	TMM,A
+	ENDIF
+
+	MVI	A,MCC_V
+	MOV	MCC,A
+	MVI	A,SMH_V		; Enable TxD/RxD
+	MOV	SMH,A
+
+	XRA	A,A
+	MOV	DEVMEM+1,A
+
+	RET
+
+CONIN:
+	MOV	A,DEVMEM+1
+	EQI	A,0
+	JR	CI1		; If saved data exists
+CI0:	
+	SKIT	FSR
+	JR	CI0
+
+	MOV	A,RXB
+
+	RET
+CI1:
+	XRA	A,A
+	MOV	DEVMEM+1,A	; Clear flag
+	MOV	A,DEVMEM
+	RET
+
+CONST:
+	XRA	A,A
+	SKIT	FSR
+	RET
+
+	MOV	A,RXB
+	MOV	DEVMEM,A	; Save for next CONIN
+	MVI	A,1
+	MOV	DEVMEM+1,A	; Set flag
+	RET
+
+CONOUT:
+	SKIT	FST	
+	JR	CONOUT
+
+	MOV	TXB,A
+
+	RET

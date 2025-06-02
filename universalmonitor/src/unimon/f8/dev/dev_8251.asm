@@ -1,0 +1,75 @@
+;;;
+;;;	8251 (USART) Console Driver
+;;;
+
+INIT:
+	;; Reset USART (hardware)
+	LI	80H
+	OUTS	1
+	LI	00H
+	OUTS	1
+	LI	80H
+	OUTS	1
+
+	;; Reset USART (software)
+	LI	00H
+	DCI	USARTC
+	ST
+	DCI	USARTC
+	ST
+	DCI	USARTC
+	ST
+	LI	40H		; Reset
+	DCI	USARTC
+	ST
+
+	;;
+	LI	4EH
+	DCI	USARTC
+	ST
+
+	LI	37H
+	DCI	USARTC
+	ST
+
+	POP			; RET
+	
+CONIN:
+	XDC
+CIN0:
+	DCI	USARTC
+	LM
+	NI	02H
+	BZ	CIN0
+	DCI	USARTD
+	LM
+	LR	0,A
+
+	XDC
+	POP			; RET
+
+CONST:
+	XDC
+
+	DCI	USARTC
+	LM
+	NI	02H
+	LR	0,A
+
+	XDC
+	POP			; RET
+
+CONOUT:
+	XDC
+COUT0:	
+	DCI	USARTC
+	LM
+	NI	01H
+	BZ	COUT0
+	LR	A,0
+	DCI	USARTD
+	ST
+
+	XDC
+	POP			; RET
+

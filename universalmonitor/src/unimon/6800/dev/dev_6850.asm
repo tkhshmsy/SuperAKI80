@@ -1,0 +1,39 @@
+;;;
+;;;	MC6850 (ACIA) Console Driver
+;;; 
+
+INIT:
+	LDAA	#$03		; Master reset
+	STAA	ACIAC
+	NOP
+	NOP
+	LDAA	#ACCR_V
+	STAA	ACIAC
+
+	RTS
+	
+CONIN:
+	LDAA	ACIAC
+	ANDA	#$01
+	BEQ	CONIN
+	LDAA	ACIAD
+
+	RTS
+	
+CONST:
+	LDAA	ACIAC
+	ANDA	#$01
+
+	RTS
+	
+CONOUT:
+	PSHA
+CO0:
+	LDAA	ACIAC
+	ANDA	#$02
+	BEQ	CO0
+	PULA
+	STAA	ACIAD
+
+	RTS
+	

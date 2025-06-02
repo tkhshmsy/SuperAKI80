@@ -1,0 +1,51 @@
+;;;
+;;;	TLCS-90 Internal UART Console Driver
+;;; 
+
+
+INIT:
+	;; Reset USART
+	LD	A,SCMOD_V
+	LD	(SCMOD),A
+	LD	A,TRUN_V
+	LD	(TRUN),A
+	LD	A,P3CR_V
+	LD	(P3CR),A
+
+	;; Write dummy (to set IRFTX)
+	XOR	A,A
+	LD	(SCBUF),A
+	
+	RET
+
+CONIN:
+	LD	A,(IRFH)
+	AND	A,02H		; IRFRX
+	JR	Z,CONIN
+
+	LD	A,(SCBUF)
+
+	RET
+
+CONST:
+	LD	A,(IRFH)
+	AND	A,02H		; IRFRX
+	SRLA
+
+	RET
+
+CONOUT:
+	PUSH	AF
+COUT0:
+	LD	A,(IRFH)
+	AND	A,01H		; IRFTX
+	JR	Z,COUT0
+
+	LD	A,0FH
+	LD	(IRFH),A	; Clear IRFTX
+
+	POP	AF
+	LD	(SCBUF),A
+
+	RET
+	

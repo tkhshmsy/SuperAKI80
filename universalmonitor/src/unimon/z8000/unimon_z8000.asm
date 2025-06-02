@@ -1,0 +1,1420 @@
+;;;
+;;; Universal Monitor Z8000
+;;;   Copyright (C) 2020,2021 Haruo Asano
+;;;
+
+	SUPMODE	ON
+	
+	INCLUDE	"config.inc"
+
+	INCLUDE	"../common.inc"
+	INCLUDE	"z8000.inc"
+
+;;;
+;;; ROM area
+;;;
+
+	;; Reset vector
+
+	ORG	ROM_B
+
+	IF SEG_CPU
+
+	DW	0000H		; Dummy
+	DW	0C000H		; FCW: System mode
+	DW	segment(CSTART) << 8
+	DW	offset(CSTART)	; INitial PC
+
+	ELSE			; SEG_CPU != 1
+	
+	DW	0000H		; Dummy
+	DW	4000H		; FCW: System mode
+	DW	CSTART		; Initial PC
+
+	ENDIF			; SEG_CPU
+
+	;; PSA (Program Status Area)
+
+	ORG	PSA_B
+
+	IF SEG_CPU
+
+SPAENT	MACRO	PC,FCW=0C000H
+	DW	0		; Dummy
+	DW	FCW
+	DW	segment(PC) << 8
+	DW	offset(PC)
+	ENDM
+
+	ELSE			; !SEG_CPU
+
+SPAENT	MACRO	PC,FCW=4000H
+	DW	FCW
+	DW	PC
+	ENDM
+
+	ENDIF
+
+INIVEC:
+	;; Dummy
+	SPAENT	0000H,0000H
+
+	;; Unimplemented Instruction
+	SPAENT	UIMP_H
+
+	;; Privileged Instruction
+	SPAENT	PRIV_H
+
+	;; System Call Instruction
+	SPAENT	SC_H
+
+	;; Segment Trap (Not applicable for Z8002)
+	SPAENT	DUMMY_H
+
+	;; NMI
+	SPAENT	DUMMY_H
+
+	;; NVI
+	SPAENT	DUMMY_H
+	
+INIVECE:
+
+	;; Code
+
+	ORG	CODE_B
+
+CSEG = segment(CODE_B)
+CSEG0 = (CODE_B & 0FFFF0000H)	; 
+	
+CSTART:
+	;;
+	IF SEG_CPU
+	LDA	RR0,INIVEC
+	LDCTL	PSAPSEG,R0
+	LDCTL	PSAPOFF,R1
+	ELSE			; !SEG_CPU
+	LDA	R0,INIVEC
+	LDCTL	PSAP,R0
+	ENDIF
+
+	IF ~~SEG_MODE
+	CPU	Z8002
+	ENDIF
+
+	LDA	ASP,STACK
+
+	CALR	INIT
+
+	LD	R0,#offset(RAM_B)
+	LD	DSADDR,R0
+	LD	GADDR,R0
+	LD	SADDR,R0
+	IF	SEG_MODE
+	LDB	CURSEG,#segment(RAM_B)
+	ENDIF
+
+	IF USE_REGCMD
+
+	;; Initialize register value
+	CLR	R0
+	LDA	AR3,REG_B
+	LD	R1,#(REG_E - REG_B)/2
+IR0:
+	LD	@AR3,R0
+	INC	R3
+	INC	R3
+	DJNZ	R1,IR0
+	IF SEG_MODE
+	LD	REGR14,#segment(USTACK) << 8
+	LD	REGR15,#offset(USTACK)
+	LD	REGSSP,#segment(STACK) << 8
+	LD	REGSSP+2,#offset(STACK)
+	LD	REGPC,#segment(RAM_B) << 8
+	LD	REGPC+2,#offset(RAM_B)
+	ELSE			       ; !SEG_MODE
+	LD	REGR15,#offset(USTACK)
+	LD	REGSSP,#offset(STACK)
+	LD	REGPC,#offset(RAM_B)
+	ENDIF
+
+	ENDIF
+
+	;; Opening message
+	LDA	AR9,OPNMSG
+	CALR	STROUT
+
+WSTART:
+	LDA	AR9,PROMPT
+	CALR	STROUT
+	CALR	GETLIN
+	CLR	R1
+	CALR	SKIPSP
+	CALR	UPPER
+	TESTB	RL0
+	JR	Z,WSTART
+
+	CP	RL0,#'D'
+	JP	Z,DUMP
+	CP	RL0,#'G'
+	JP	Z,GO
+	CP	RL0,#'S'
+	JP	Z,SETM
+
+	CP	RL0,#'L'
+	JP	Z,LOADH
+
+	CP	RL0,#'I'
+	JP	Z,PIN
+	CP	RL0,#'O'
+	JP	Z,POUT
+
+	IF USE_REGCMD
+	CP	RL0,#'R'
+	JP	Z,REG
+	ENDIF
+
+ERR:
+	LDA	AR9,ERRMSG
+	CALR	STROUT
+
+	JR	WSTART
+
+;;;
+;;; DUMP memory
+;;;
+
+DUMP:
+	INC	R1
+	CALR	SKIPSP
+	CALR	RDADR
+	TEST	RL2
+	JR	NZ,DP0
+	;; No arg.
+	CALR	SKIPSP
+	TEST	RL0
+	JR	NZ,ERR
+
+	LD	R4,DSADDR
+	LD	R5,R4
+	ADD	R5,#128		; DEADDR
+	JP	DPM
+
+	;; 1st arg. found
+DP0:
+	LD	R4,R3		; DSADDR
+	LD	RL0,INBUF(R1)
+	CP	RL0,#','
+	JR	Z,DP1
+	TEST	RL0
+	JR	NZ,ERR
+	;; No 2nd arg.
+	LD	R5,R4
+	ADD	R5,#128
+	JP	DPM
+DP1:
+	INC	R1
+	CALR	SKIPSP
+	CALR	RDHEX
+	CALR	SKIPSP
+	TEST	RL2
+	JR	Z,ERR
+	TESTB	INBUF(R1)
+	JR	NZ,ERR
+	LD	R5,R3
+	INC	R5
+DPM:
+	;; DUMP main
+	IF SEG_MODE
+	LD	RH6,CURSEG
+	CLR	RL6
+	ENDIF
+	LD	R7,R4
+	AND	R7,#0FFF0H
+	CLR	RH2		; DSTATE
+DPM0:
+	CALR	DPL
+	CALR	CONST
+	TEST	RL0
+	JR	NZ,DPM1		; abort
+	CP	RH2,#2
+	JR	C,DPM0
+	LD	DSADDR,R5
+	JP	WSTART
+DPM1:
+	LD	DSADDR,R7
+	CALR	CONIN
+	JP	WSTART
+
+DPL:
+	;; DUMP line
+	LD	R1,R7
+	CALR	ADROUT
+	LDA	AR9,DSEP0
+	CALR	STROUT
+	CLR	R1		; INBUF(R1)
+	LD	RL2,#16
+DPL0:
+	CALR	DPB
+	DBJNZ	RL2,DPL0
+
+	LDA	AR9,DSEP1
+	CALR	STROUT
+
+	CLR	R1
+	LD	RL2,#16
+DPL1:
+	LD	RL0,INBUF(R1)
+	INC	R1
+	CP	RL0,#' '
+	JR	C,DPL2
+	CP	RL0,#7FH
+	JR	NC,DPL2
+	CALR	CONOUT
+	JR	DPL3
+DPL2:
+	LD	RL0,#'.'
+	CALR	CONOUT
+DPL3:
+	DBJNZ	RL2,DPL1
+	JP	CRLF
+
+DPB:
+	;; DUMP byte
+	LD	RL0,#' '
+	CALR	CONOUT
+	TEST	RH2
+	JR	NZ,DPB2
+	;; State 0
+	CP	R7,R4
+	JR	Z,DPB1
+DPB0:
+	;; Still 0 or 2
+	LD	RL0,#' '
+	LD	INBUF(R1),RL0
+	CALR	CONOUT
+	LD	RL0,#' '
+	CALR	CONOUT
+	INC	R7
+	INC	R1
+	RET
+DPB1:
+	;; Found start address
+	LD	RH2,#1
+DPB2:
+	CP	RH2,#1
+	JR	NZ,DPB0		; state 2
+	;; DUMP state 1
+	LD	RL0,@AR7
+	LD	INBUF(R1),RL0
+	CALR	HEXOUT2
+	INC	R7
+	INC	R1
+
+	CP	R7,R5
+	JR	NZ,DPB3
+	;; Found end address
+	LD	RH2,#2
+DPB3:
+	RET
+
+;;;
+;;; GO address
+;;;
+
+GO:
+	INC	R1
+	CALR	SKIPSP
+	CALR	RDADR
+	CALR	SKIPSP
+	TESTB	INBUF(R1)
+	JP	NZ,ERR
+	TEST	RL2
+	JR	Z,G0
+
+	IF USE_REGCMD
+
+	IF SEG_MODE
+	LD	RH2,CURSEG
+	CLR	RL2
+	LD	REGPC,RR2
+	ELSE
+	;; !SEG_MODE
+	LD	REGPC,R3
+	ENDIF
+G0:
+	LD	R15,REGSSP
+	LD	R0,REGR15
+	LDCTL	NSPOFF,R0
+
+	IF SEG_MODE
+	PUSH	@ASP,REGPC+2	; PC offset
+	ENDIF
+	PUSH	@ASP,REGPC	; PC segment if SEG_MODE, offset if not SEG_MODE
+	PUSH	@ASP,REGFCW
+	PUSH	@ASP,#0
+
+	LDM	R0,REGR0,#15
+	IRET
+
+	ELSE
+	
+	LD	GADDR,R3
+G0:
+	IF SEG_MODE
+	LD	RH2,CURSEG
+	CLR	RL2
+	ENDIF
+	LD	R3,GADDR
+	JP	@AR3
+
+	ENDIF
+
+;;;
+;;; SET memory
+;;;
+
+SETM:	
+	INC	R1
+	CALR	SKIPSP
+	CALR	RDADR
+	TEST	RL2
+	JR	Z,SM0
+	LD	SADDR,R3
+SM0:
+	CALR	SKIPSP
+	TEST	RL0
+	JP	NZ,ERR
+	IF SEG_MODE
+	LD	RH6,CURSEG
+	CLR	RL6
+	ENDIF
+	LD	R7,SADDR
+SM1:
+	LD	R1,R7
+	CALR	ADROUT
+	LDA	AR9,DSEP1
+	CALR	STROUT
+	LD	RL0,@AR7
+	CALR	HEXOUT2
+	LD	RL0,#' '
+	CALR	CONOUT
+	CALR	GETLIN
+	CLR	R1
+	CALR	SKIPSP
+	TEST	RL0
+	JR	NZ,SM2
+	;; Empty (Increment address)
+	INC	R7
+	LD	SADDR,R7
+	JR	SM1
+SM2:
+	CP	RL0,#'-'
+	JR	NZ,SM3
+	;; '-' (Decrement address)
+	DEC	R7
+	LD	SADDR,R7
+	JR	SM1
+SM3:
+	CP	RL0,#'.'
+	JR	NZ,SM4
+	;; '.' (Quit)
+	LD	SADDR,R7
+	JP	WSTART
+SM4:
+	CALR	RDHEX
+	TEST	RL2
+	JP	Z,ERR
+	LD	@AR7,RL3
+	INC	R7
+	LD	SADDR,R7
+	JR	SM1
+
+;;;
+;;; LOAD HEX file
+;;;
+
+LOADH:
+	INC	R1
+	CALR	SKIPSP
+	CALR	RDADR
+	CALR	SKIPSP
+	TEST	RL0
+	JP	NZ,ERR
+
+	TEST	RL2
+	JR	NZ,LH0
+
+	CLR	R3		; Offset
+LH0:
+	CALR	CONIN
+	CALR	UPPER
+	CP	RL0,#'S'
+	JR	Z,LHS0
+LH1:
+	CP	RL0,#':'
+	JR	Z,LHI0
+LH2:
+	;; Skip to EOL
+	CP	RL0,#CR
+	JR	Z,LH0
+	CP	RL0,#LF
+	JR	Z,LH0
+LH3:
+	CALR	CONIN
+	JR	LH2
+
+LHI0:
+	CALR	HEXIN
+	LD	RH2,RL0		; Checksum
+	LD	RL2,RL0		; Length
+
+	CALR	HEXIN
+	LD	RH1,RL0		; Address H
+	ADD	RH2,RL0		; Checksum
+
+	CALR	HEXIN
+	LD	RL1,RL0		; Address L
+	ADD	RH2,RL0		; Checksum
+
+	;; Add offset
+	ADD	R1,R3
+	IF SEG_MODE
+	LD	RH6,CURSEG
+	CLR	RL6
+	ENDIF
+	LD	R7,R1
+
+	CALR	HEXIN
+	LD	RL4,RL0		; RECTYP
+	ADD	RH2,RL0		; Checksum
+
+	TEST	RL2
+	JR	Z,LHI3
+LHI1:
+	CALR	HEXIN
+	ADD	RH2,RL0		; Checksum
+
+	TEST	RL4
+	JR	NZ,LHI2
+
+	LD	@AR7,RL0
+	INC	R7
+LHI2:
+	DBJNZ	RL2,LHI1
+LHI3:
+	CALR	HEXIN
+	ADD	RH2,RL0
+	JR	NZ,LHIE		; Checksum error
+
+	TEST	RL4
+	JR	Z,LH3
+	JP	WSTART
+LHIE:
+	LDA	AR9,IHEMSG
+	CALR	STROUT
+	JP	WSTART
+
+LHS0:
+	CALR	CONIN
+	LD	RL4,RL0		; RECTYP
+
+	CALR	HEXIN
+	LD	RL2,RL0		; Length+3
+	LD	RH2,RL0		; Checksum
+
+	CALR	HEXIN
+	LD	RH1,RL0		; Address H
+	ADD	RH2,RL0		; Checksum
+
+	CALR	HEXIN
+	LD	RL1,RL0		; Addreess L
+	ADD	RH2,RL0		; Checksum
+
+	;; Add offset
+	ADD	R1,R3
+	IF SEG_MODE
+	LD	RH6,CURSEG
+	CLR	RL6
+	ENDIF
+	LD	R7,R1
+
+	SUB	RL2,#3
+	JR	Z,LHS3
+LHS1:
+	CALR	HEXIN
+	ADD	RH2,RL0		; Checksum
+
+	CP	RL4,#'1'
+	JR	NZ,LHS2
+
+	LD	@AR7,RL0
+	INC	R7
+LHS2:
+	DBJNZ	RL2,LHS1
+LHS3:
+	CALR	HEXIN
+	ADD	RH2,RL0
+	CP	RH2,#0FFH
+	JR	NZ,LHSE
+
+	CP	RL4,#'9'
+	JP	Z,WSTART
+	JR	LH3
+LHSE:
+	LDA	AR9,SHEMSG
+	CALR	STROUT
+	JP	WSTART
+
+;;;
+;;; Port in
+;;;
+
+PIN:
+	CLR	R5
+PI0:
+	INC	R1
+	LD	RL0,INBUF(R1)
+	CALR	UPPER
+	CP	RL0,#'S'
+	JR	NZ,PI1
+	OR	R5,#02H
+	JR	PI0
+PI1:
+	CP	RL0,#'W'
+	JR	NZ,PI2
+	OR	R5,#04H
+	JR	PI0
+PI2:
+	CALR	SKIPSP
+	CALR	RDHEX
+	TEST	RL2
+	JP	Z,ERR		; Port no. missing
+	CALR	SKIPSP
+	TEST	RL0
+	JP	NZ,ERR
+
+	LD	R2,#segment(PINB) ; Asumes PINB, PISB, PINW and PISW reside in same segment
+	LD	R3,PITAB(R5)
+	CALL	@AR3
+	CALR	CRLF
+	JP	WSTART
+
+PITAB:
+	DW	offset(PINB)
+	DW	offset(PISB)
+	DW	offset(PINW)
+	DW	offset(PISW)
+
+PINB:	
+	;; Normal - Byte
+	INB	RL0,@R3
+	JP	HEXOUT2
+
+PISB:
+	;; Special - Byte
+	LD	INBUF,#3A85H	; SINB RL0,xxxx
+	LD	INBUF+2,R3
+	LD	INBUF+4,#9E08H	; RET
+	CALL	INBUF
+	JP	HEXOUT2
+
+PINW:
+	;; Normal - Word
+	IN	R1,@R3
+	JP	HEXOUT4
+
+PISW:
+	;; Special - Word
+	LD	INBUF,#3B15H	; SIN R1,xxxx
+	LD	INBUF+2,R3
+	LD	INBUF+4,#9E08H	; RET
+	CALL	INBUF
+	JP	HEXOUT4
+	
+;;;
+;;; Port out
+;;;
+
+POUT:
+	CLR	RL5
+PO0:
+	INC	R1
+	LD	RL0,INBUF(R1)
+	CALR	UPPER
+	CP	RL0,#'S'
+	JR	NZ,PO1
+	OR	RL5,#02H
+	JR	PO0
+PO1:
+	CP	RL0,#'W'
+	JR	NZ,PO2
+	OR	RL5,#04H
+	JR	PO0
+PO2:
+	CALR	SKIPSP
+	CALR	RDHEX
+	TEST	RL2
+	JP	Z,ERR		; Port no. missing
+	LD	R4,R3
+	CALR	SKIPSP
+	CP	RL0,#','
+	JP	NZ,ERR
+	INC	R1
+	CALR	SKIPSP
+	CALR	RDHEX
+	TEST	RL2
+	JP	Z,ERR		; Data missing
+	CALR	SKIPSP
+	TEST	RL0
+	JP	NZ,ERR
+
+	LD	R2,#segment(PONB) ; Asumes PONB, POSB, PONW and POSW reside in same segment
+	LD	R3,POTAB(R5)
+	CALL	@AR3
+	JP	WSTART
+
+POTAB:
+	DW	offset(PONB)
+	DW	offset(POSB)
+	DW	offset(PONW)
+	DW	offset(POSW)
+
+PONB:
+	;; Normal - Byte
+	OUTB	@R4,RL3
+	RET
+
+POSB:
+	;; Special - Byte
+	LD	INBUF,#3AB7H	; SOUTB xxxx,RL3
+	LD	INBUF+2,R4
+	LD	INBUF+4,#9E08H	; RET
+	CALL	INBUF
+	RET
+
+PONW:
+	;; Normal - Word
+	OUT	@R4,R3
+	RET
+
+POSW:
+	;; Special - Word
+	LD	INBUF,#3B37H	; SOUT xxxx,R3
+	LD	INBUF+2,R4
+	LD	INBUF+4,#9E08H	; RET
+	CALL	INBUF
+	RET
+
+;;;
+;;; Register
+;;;
+	IF USE_REGCMD
+
+REG:
+	INC	R1
+	CALR	SKIPSP
+	CALR	UPPER
+	TEST	RL0
+	JR	NZ,RG0
+	CALR	RDUMP
+	JP	WSTART
+RG0:
+	LD	R4,#offset(RNTAB)
+RG1:
+	CP	RL0,CSEG0(R4)
+	JR	Z,RG2		; Character match
+	TESTB	CSEG0+1(R4)
+	JR	Z,RGE
+	ADD	R4,#6
+	JR	RG1
+RG2:
+	LD	RL5,CSEG0+1(R4)
+	CP	RL5,#0FH
+	JR	NZ,RG3
+	;; Next table
+	LD	R4,CSEG0+2(R4)
+	INC	R1
+	LD	RL0,INBUF(R1)
+	CALR	UPPER
+	JR	RG1
+RG3:
+	TEST	RL5
+	JR	Z,RGE		; Found end mark
+
+	LD	R1,CSEG0+4(R4)	; REG name
+	CALR	STROUT
+	LD	RL0,#'='
+	CALR	CONOUT
+	LD	R4,CSEG0+2(R4)	; REG saved address
+	AND	RL5,#07H
+	CP	RL5,#1
+	JR	NZ,RG4
+	;; 8 bit register
+	LD	RL0,DSEG0(R4)
+	CALR	HEXOUT2
+	JR	RG5
+RG4:
+	CP	RL5,#2
+	JR	NZ,RG40
+	;; 16 bit register
+	LD	R1,DSEG0(R4)
+	CALR	HEXOUT4
+	JR	RG5
+RG40:
+	IF SEG_MODE
+	;; 32 bit register
+	LD	R1,<<DSEG>>0(R4)
+	CALR	HEXOUT4
+	LD	RL0,#':'
+	CALR	CONOUT
+	LD	R1,<<DSEG>>2(R4)
+	CALR	HEXOUT4
+	ENDIF
+RG5:
+	LD	RL0,#' '
+	CALR	CONOUT
+	CALR	GETLIN
+	CLR	R1
+	CALR	SKIPSP
+	CALR	RDHEX
+	TEST	RL2
+	JR	Z,RGR
+	CP	RL5,#1
+	JR	NZ,RG6
+	;; 8 bit register
+	LD	DSEG0(R4),RL3
+	JR	RG7
+RG6:
+	CP	RL5,#2
+	JR	NZ,RG60
+	;; 16 bit register
+	LD	DSEG0(R4),R3
+	JR	RG7
+RG60:
+	IF SEG_MODE
+	;; 32 bit register
+	CP	RL0,#':'
+	JR	NZ,RG61
+	LD	<<DSEG>>0(R4),R3
+	INC	R1
+	CALR	RDHEX
+RG61:
+	LD	<<DSEG>>2(R4),R3
+	ENDIF
+RG7:
+RGR:
+	JP	WSTART
+RGE:
+	JP	ERR
+
+RDUMP:
+	LD	R2,#offset(RDTAB)
+RD0:
+	IF SEG_MODE
+	LD	R8,#CSEG << 8
+	ENDIF
+	LD	R9,CSEG0(R2)
+	TEST	R9
+	JR	Z,RD1
+	CALR	STROUT
+	LD	R1,CSEG0+2(R2)
+	LD	R1,CSEG0(R1)
+	CALR	HEXOUT4
+	ADD	R2,#4
+	JR	RD0
+RD1:
+	JP	CRLF
+
+	ENDIF
+
+;;;
+;;; Other support routines
+;;;
+
+STROUT:
+	LDB	RL0,@AR9
+	TESTB	RL0
+	JR	Z,STROE
+	CALR	CONOUT
+	INC	R9
+	JR	STROUT
+STROE:
+	RET
+
+HEXOUT4:
+	LD	RL0,RH1
+	CALR	HEXOUT2
+	LD	RL0,RL1
+HEXOUT2:
+	PUSH	@ASP,R0
+	SRL	RL0,#4
+	CALR	HEXOUT1
+	POP	R0,@ASP
+HEXOUT1:
+	AND	RL0,#0FH
+	ADD	RL0,#'0'
+	CP	RL0,#'9'+1
+	JP	C,CONOUT
+	ADD	RL0,#'A'-'9'-1
+	JP	CONOUT
+
+HEXIN:
+	CLR	RL0
+	CALR	HI0
+	SLL	RL0,#4
+HI0:
+	PUSH	@ASP,R1
+	LD	RL1,RL0
+	CALR	CONIN
+	CALR	UPPER
+	CP	RL0,#'0'
+	JR	C,HIR
+	CP	RL0,#'9'+1
+	JR	C,HI1
+	CP	RL0,#'A'
+	JR	C,HIR
+	CP	RL0,#'F'+1
+	JR	NC,HIR
+	SUB	RL0,#'A'-'9'-1
+HI1:
+	SUB	RL0,#'0'
+	OR	RL0,RL1
+HIR:
+	POP	R1,@ASP
+	RET
+
+CRLF:
+	LD	RL0,#CR
+	CALR	CONOUT
+	LD	RL0,#LF
+	JP	CONOUT
+
+GETLIN:
+	CLR	R1
+	CLR	RL2
+GL0:
+	CALR	CONIN
+	CP	RL0,#CR
+	JR	Z,GLE
+	CP	RL0,#LF
+	JR	Z,GLE
+	CP	RL0,#BS
+	JR	Z,GLB
+	CP	RL0,#DEL
+	JR	Z,GLB
+	CP	RL0,#' '
+	JR	C,GL0
+	CP	RL0,#80H
+	JR	NC,GL0
+	CP	RL2,#BUFLEN-1
+	JR	NC,GL0		; Too long
+	LD	INBUF(R1),RL0
+	CALR	CONOUT
+	INC	R1
+	INC	RL2
+	JR	GL0
+GLB:
+	TEST	RL2
+	JR	Z,GL0
+	DEC	R1
+	DEC	RL2
+	LD	RL0,#BS
+	CALR	CONOUT
+	LD	RL0,#' '
+	CALR	CONOUT
+	LD	RL0,#BS
+	CALR	CONOUT
+	JR	GL0
+GLE:
+	LDB	INBUF(R1),#00H
+	JP	CRLF
+
+SKIPSP:
+	LD	RL0,INBUF(R1)
+	CP	RL0,#' '
+	JR	NZ,SSR
+	INC	R1
+	JR	SKIPSP
+SSR:
+	RET
+
+UPPER:
+	CP	RL0,#'a'
+	JR	C,UPR
+	CP	RL0,#'z'+1
+	JR	NC,UPR
+	ADD	RL0,#'A'-'a'
+UPR:
+	RET
+
+RDHEX:
+	CLR	RL2		; count
+	CLR	R3		; value
+RDH0:
+	LD	RL0,INBUF(R1)
+	CALR	UPPER
+	CP	RL0,#'0'
+	JR	C,RDHE
+	CP	RL0,#'9'+1
+	JR	C,RDH1
+	CP	RL0,#'A'
+	JR	C,RDHE
+	CP	RL0,#'F'+1
+	JR	NC,RDHE
+	SUB	RL0,#'A'-'9'-1
+RDH1:
+	SUB	RL0,#'0'
+	SLA	R3,4
+	OR	RL3,RL0
+	INC	R1
+	INC	RL2
+	JR	RDH0
+RDHE:
+	RET
+
+ADROUT:
+	IF SEG_MODE
+	LD	RL0,CURSEG
+	CALR	HEXOUT2
+	LD	RL0,#':'
+	CALR	CONOUT
+	ENDIF
+	JP	HEXOUT4
+
+RDADR:
+	CALR	RDHEX
+	IF SEG_MODE
+	CP	RL0,#':'
+	JR	NZ,RDA0
+	AND	RL3,#7FH
+	LD	CURSEG,RL3
+	INC	R1
+	CALR	RDHEX
+RDA0:	
+	ENDIF
+	RET
+
+;;;
+;;; Handler
+;;; 
+
+DUMMY_H:
+	IRET
+
+UIMP_H:
+	IF USE_REGCMD
+	LDM	REGR0,R0,#15	; Save R0-R14
+	ELSE
+	LDM	REGR0,R0,#3
+	ENDIF
+
+	LDA	AR9,UIMMSG
+	LD	RL2,#1
+
+	POP	R0,@ASP
+	LD	SCNUM,R0
+	JR	COMM_H
+
+PRIV_H:
+	IF USE_REGCMD
+	LDM	REGR0,R0,#15	; Save R0-R14
+	ELSE
+	LDM	REGR0,R0,#3
+	ENDIF
+
+	LDA	AR9,PRVMSG
+	LD	RL2,#1
+
+	POP	R0,@ASP
+	LD	SCNUM,R0
+	JR	COMM_H
+
+SC_H:
+	IF USE_REGCMD
+	LDM	REGR0,R0,#15	; Save R0-R14
+	ELSE
+	LDM	REGR0,R0,#3
+	ENDIF
+
+	LDA	AR9,BRKMSG
+	CLR	RL2
+
+	POP	R0,@ASP
+	LD	SCNUM,R0
+	CP	RL0,#0FFH
+	JR	Z,COMM_H
+
+	JR	NOTBRK
+	
+COMM_H:	
+	IF USE_REGCMD
+	POP	REGFCW,@ASP
+	IF SEG_MODE
+	POP	R0,@ASP
+	LD	REGPC,R0
+	POP	R0,@ASP
+	SUB	R0,#2
+	LD	REGPC+2,R0
+	ELSE			; !SEG_MODE
+	POP	R0,@ASP
+	SUB	R0,#2
+	LD	REGPC,R0
+	ENDIF			; SEG_MODE
+	LD	REGSSP,R15
+	LDCTL	R0,NSPOFF
+	LD	REGR15,R0
+	ELSE
+	ADD	R15,#4		; Drop FCW & PC
+	ENDIF
+
+	CALR	STROUT
+	TEST	RL2
+	JR	Z,CH0
+
+	LD	RL0,#' '
+	CALR	CONOUT
+	LD	RL0,#'('
+	CALR	CONOUT
+	LD	R1,SCNUM
+	CALR	HEXOUT4
+	LD	RL0,#')'
+	CALR	CONOUT
+CH0:
+	CALR	CRLF
+
+	IF USE_REGCMD
+	CALR	RDUMP
+	ENDIF
+
+	JP	WSTART
+
+NOTBRK:
+	;; Identifier was not 0FFH(BREAK)
+	PUSH	@ASP,R0
+
+	IF USE_REGCMD
+	LDM	R0,REGR0,#15
+	ELSE
+	LDM	R0,REGR0,#3
+	ENDIF
+
+	IRET
+
+;;;
+;;; Data area
+;;;
+
+OPNMSG:
+	DB	CR,LF,"Universal Monitor Z8000",CR,LF,00H
+
+PROMPT:
+	DB	"] ",00H
+
+IHEMSG:
+	DB	"Error ihex",CR,LF,00H
+SHEMSG:
+	DB	"Error srec",CR,LF,00H
+ERRMSG:
+	DB	"Error",CR,LF,00H
+
+DSEP0:
+	DB	" :",00H
+DSEP1:
+	DB	" : ",00H
+
+UIMMSG:	DB	"Unimplemented Instruction",00H
+PRVMSG:	DB	"Privileged Instruction",00H
+BRKMSG:	DB	"Break",00H
+
+	IF USE_REGCMD
+
+	ALIGN	2
+RDTAB:	DW	RDSR0,  offset(REGR0)
+	DW	RDSC,   offset(REGR1)
+	DW	RDSC,   offset(REGR2)
+	DW	RDSC,   offset(REGR3)
+	DW	RDSCS,  offset(REGR4)
+	DW	RDSC,   offset(REGR5)
+	DW	RDSC,   offset(REGR6)
+	DW	RDSC,   offset(REGR7)
+	DW	RDSFCW, offset(REGFCW)
+	DW	RDSPC,  offset(REGPC)
+	IF SEG_MODE
+	DW	RDSS,	offset(REGPC+2)
+	ENDIF
+	DW	RDSR8,  offset(REGR8)
+	DW	RDSC,   offset(REGR9)
+	DW	RDSC,   offset(REGR10)
+	DW	RDSC,   offset(REGR11)
+	DW	RDSCS,  offset(REGR12)
+	DW	RDSC,   offset(REGR13)
+	DW	RDSC,   offset(REGR14)
+	DW	RDSC,   offset(REGR15)
+	DW	RDSSSP, offset(REGSSP)
+	IF SEG_MODE
+	DW	RDSS,	offset(REGSSP+2)
+	ENDIF
+
+	DW	0000H,  0000H
+
+RDSR0:	DB	"R0-R7 =",00H
+RDSFCW:	DB	"  FCW=",00H
+RDSPC:	DB	" PC=",00H
+RDSR8:	DB	CR,LF,"R8-R15=",00H
+RDSSSP:	DB	"  SSP=",00H
+RDSC:	DB	",",00H
+RDSCS:	DB	", ",00H
+	IF SEG_MODE
+RDSS:	DB	":",00H
+	ENDIF
+
+	ALIGN	2
+RNTAB:
+	DB	'F',0FH		; "F?"
+	DW	RNTABF,0
+	DB	'P',0FH		; "P?"
+	DW	RNTABP,0
+	DB	'R',0FH		; "R?"
+	DW	RNTABR,0
+	DB	'S',0FH		; "S?"
+	DW	RNTABS,0
+	DB	00H,0		; End mark
+	DW	0,0
+
+RNTABF:
+	DB	'C',0FH		; "FC?"
+	DW	RNTABFC,0
+	
+	DB	00H,0		; End mark
+	DW	0,0
+
+RNTABFC:
+	DB	'W',2		; "FCW"
+	DW	offset(REGFCW),RNFCW
+
+	DB	00H,0		; End mark
+	DW	0,0
+
+RNTABP:
+	IF SEG_MODE
+	DB	'C',4		; "PC"
+	DW	offset(REGPC),RNPC
+	ELSE
+	DB	'C',2		; "PC"
+	DW	offset(REGPC),RNPC
+	ENDIF
+
+	DB	00H,0		; End mark
+	DW	0,0
+
+RNTABR:
+	DB	'0',2		; "R0"
+	DW	offset(REGR0),RNR0
+	DB	'1',0FH		; "R1?"
+	DW	RNTABR1,0
+	DB	'2',2		; "R2"
+	DW	offset(REGR2),RNR2
+	DB	'3',2		; "R3"
+	DW	offset(REGR3),RNR3
+	DB	'4',2		; "R4"
+	DW	offset(REGR4),RNR4
+	DB	'5',2		; "R5"
+	DW	offset(REGR5),RNR5
+	DB	'6',2		; "R6"
+	DW	offset(REGR6),RNR6
+	DB	'7',2		; "R7"
+	DW	offset(REGR7),RNR7
+	DB	'8',2		; "R8"
+	DW	offset(REGR8),RNR8
+	DB	'9',2		; "R9"
+	DW	offset(REGR9),RNR9
+	DB	'H',0FH		; "RH?"
+	DW	RNTABRH,0
+	DB	'L',0FH		; "RL?"
+	DW	RNTABRL,0
+
+	DB	00H,0		; End mark
+	DW	0,0
+
+RNTABR1:
+	DB	00H,2		; "R1"
+	DW	offset(REGR1),RNR1
+	DB	'0',2		; "R10"
+	DW	offset(REGR10),RNR10
+	DB	'1',2		; "R11"
+	DW	offset(REGR11),RNR11
+	DB	'2',2		; "R12"
+	DW	offset(REGR12),RNR12
+	DB	'3',2		; "R13"
+	DW	offset(REGR13),RNR13
+	DB	'4',2		; "R14"
+	DW	offset(REGR14),RNR14
+	DB	'5',2		; "R15"
+	DW	offset(REGR15),RNR15
+	
+	DB	00H,0		; End mark
+	DW	0,0
+
+RNTABRH:
+	DB	'0',1		; "RH0"
+	DW	offset(REGR0),RNRH0
+	DB	'1',1		; "RH1"
+	DW	offset(REGR1),RNRH1
+	DB	'2',1		; "RH2"
+	DW	offset(REGR2),RNRH2
+	DB	'3',1		; "RH3"
+	DW	offset(REGR3),RNRH3
+	DB	'4',1		; "RH4"
+	DW	offset(REGR4),RNRH4
+	DB	'5',1		; "RH5"
+	DW	offset(REGR5),RNRH5
+	DB	'6',1		; "RH6"
+	DW	offset(REGR6),RNRH6
+	DB	'7',1		; "RH7"
+	DW	offset(REGR7),RNRH7
+
+	DB	00H,0		; End mark
+	DW	0,0
+
+RNTABRL:
+	DB	'0',1		; "RL0"
+	DW	offset(REGR0+1),RNRL0
+	DB	'1',1		; "RL1"
+	DW	offset(REGR1+1),RNRL1
+	DB	'2',1		; "RL2"
+	DW	offset(REGR2+1),RNRL2
+	DB	'3',1		; "RL3"
+	DW	offset(REGR3+1),RNRL3
+	DB	'4',1		; "RL4"
+	DW	offset(REGR4+1),RNRL4
+	DB	'5',1		; "RL5"
+	DW	offset(REGR5+1),RNRL5
+	DB	'6',1		; "RL6"
+	DW	offset(REGR6+1),RNRL6
+	DB	'7',1		; "RL7"
+	DW	offset(REGR7+1),RNRL7
+
+	DB	00H,0		; End mark
+	DW	0,0
+
+RNTABS:
+	DB	'S',0FH		; "SS?"
+	DW	RNTABSS,0
+
+	DB	00H,0		; End mark
+	DW	0,0
+
+RNTABSS:
+	IF SEG_MODE
+	DB	'P',4		; "SSP"
+	DW	offset(REGSSP),RNSSP
+	ELSE
+	DB	'P',2		; "SSP"
+	DW	offset(REGSSP),RNSSP
+	ENDIF
+
+	DB	00H,0		; End mark
+	DW	0,0
+
+RNFCW:	DB	"FCW",00H
+RNPC:	DB	"PC",00H
+
+RNR0:	DB	"R0",00H
+RNR1:	DB	"R1",00H
+RNR2:	DB	"R2",00H
+RNR3:	DB	"R3",00H
+RNR4:	DB	"R4",00H
+RNR5:	DB	"R5",00H
+RNR6:	DB	"R6",00H
+RNR7:	DB	"R7",00H
+RNR8:	DB	"R8",00H
+RNR9:	DB	"R9",00H
+RNR10:	DB	"R10",00H
+RNR11:	DB	"R11",00H
+RNR12:	DB	"R12",00H
+RNR13:	DB	"R13",00H
+RNR14:	DB	"R14",00H
+RNR15:	DB	"R15",00H
+
+RNRH0:	DB	"RH0",00H
+RNRH1:	DB	"RH1",00H
+RNRH2:	DB	"RH2",00H
+RNRH3:	DB	"RH3",00H
+RNRH4:	DB	"RH4",00H
+RNRH5:	DB	"RH5",00H
+RNRH6:	DB	"RH6",00H
+RNRH7:	DB	"RH7",00H
+	
+RNRL0:	DB	"RL0",00H
+RNRL1:	DB	"RL1",00H
+RNRL2:	DB	"RL2",00H
+RNRL3:	DB	"RL3",00H
+RNRL4:	DB	"RL4",00H
+RNRL5:	DB	"RL5",00H
+RNRL6:	DB	"RL6",00H
+RNRL7:	DB	"RL7",00H
+
+RNSSP:	DB	"SSP",00H
+
+	ENDIF
+
+	ALIGN 2
+	
+	IF USE_DEV_8530
+	INCLUDE	"dev/dev_8530.asm"
+	ENDIF
+
+;;;
+;;; RAM area
+;;;
+
+	;;
+	;; Work area
+	;;
+
+	ORG	WORK_B
+
+DSEG = segment(WORK_B)
+DSEG0 = (WORK_B & 0FFFF0000H)	;
+
+INBUF:	DS	BUFLEN		; Line input buffer
+	ALIGN	2
+DSADDR:	DS	2		; DUMP start address
+SADDR:	DS	2		; SET address
+GADDR:	DS	2		; GO address
+	IF SEG_MODE
+CURSEG:	DS	1		; Current segment
+	ENDIF
+
+	ALIGN	2
+REG_B:
+REGR0:	DS	2
+REGR1:	DS	2
+REGR2:	DS	2
+	IF USE_REGCMD
+REGR3:	DS	2
+REGR4:	DS	2
+REGR5:	DS	2
+REGR6:	DS	2
+REGR7:	DS	2
+REGR8:	DS	2
+REGR9:	DS	2
+REGR10:	DS	2
+REGR11:	DS	2
+REGR12:	DS	2
+REGR13:	DS	2
+REGR14:	DS	2
+REGR15:	DS	2		; Normal Stack Pointer
+REGFCW:	DS	2		;
+	IF SEG_MODE
+REGPC:	DS	4
+REGSSP:	DS	4
+	ELSE			; !SEG_MODE
+REGPC:	DS	2
+REGSSP:	DS	2
+	ENDIF
+REG_E:
+	ENDIF
+SCNUM:	DS	2		; System Call number
+
+	END

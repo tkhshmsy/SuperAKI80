@@ -1,0 +1,1325 @@
+;;;
+;;;     Universal Monitor for Panafacom MN1610
+;;;
+
+	CPU	MN1610
+
+TARGET:	EQU	"MN1610"
+
+	INCLUDE	"config.inc"
+
+	INCLUDE "../common.inc"
+
+	IF CPU_MN1613
+	CPU	MN1613
+	ENDIF
+
+;;;
+;;; Zero page
+;;;
+
+	ORG	X'0000'
+
+OPSW0:	DS	2		; RESET / IRQ0
+OPSW1:	DS	2		; IRQ1
+OPSW2:	DS	2		; IRQ2
+OPSW3:	DS	2
+
+	ORG	ENTRY
+	
+C_CSTART:
+	DS	1
+C_WSTART:
+	DS	1
+C_CONOUT:
+	DS	1
+C_STROUT:
+	DS	1
+C_CONIN:
+	DS	1
+C_CONST:
+	DS	1
+	DS	1
+
+C_ERR:
+	DS	1
+C_SKIPSP:
+	DS	1
+C_UPPER:
+	DS	1
+C_RDHEX:
+	DS	1
+C_GETLIN:
+	DS	1
+C_HEXOUT4:
+	DS	1
+C_CRLF:
+	DS	1
+
+;;;
+;;; ROM area
+;;;
+
+	ORG	X'0100'
+
+	IF USE_REGCMD && CPU_MN1613
+NSPW0:	DC	X'0000'
+	DC	IRQ0H
+	ELSE			; USE_REGCMD
+NSPW0:	DC	X'0000'		; RESET / IRQ0
+	DC	CSTART
+	ENDIF			; USE_REGCMD
+NSPW1:	DC	X'0000'		; IRQ1
+	DC	CSTART
+NSPW2:	DC	X'0000'		; IRQ2
+	DC	CSTART
+
+INITSP:	DC	STACK
+INITAD:	DC	X'0800'
+OMSGA:	DC	OPNMSG
+PROMPA:	DC	PROMPT
+
+	IF CPU_MN1613
+
+	ORG	RSBASE
+	DC	X'0000'		; Dummy
+	DC	X'0000'		; Dummy
+	DC	X'0000'		; Initial STR
+	DC	CSTART		; Initial IP
+
+	ENDIF
+
+	
+ENTTAB:
+	DC	CSTART
+	DC	WSTART
+	DC	CONOUT
+	DC	STROUT
+	DC	CONIN
+	DC	CONST
+	DC	0
+
+	DC	ERR
+	DC	SKIPSP
+	DC	UPPER
+	DC	RDHEX
+	DC	GETLIN
+	DC	HEXOUT4
+	DC	CRLF
+ENTTAB_E:
+
+ENTTABA:
+	DC	ENTTAB
+ENTRYA:
+	DC	ENTRY
+BREAKA:
+	DC	BREAK
+
+CSTART:
+	L	SP,INITSP
+
+	;; Copy entry point table (ROM ==> Zero page)
+	L	X0,ENTTABA
+	L	X1,ENTRYA
+	MVI	R2,(ENTTAB_E-ENTTAB)
+INI0:
+	L	R0,0(X0)
+	ST	R0,0(X1)
+	AI	X0,1
+	AI	X1,1
+	SI	R2,1,Z
+	B	INI0
+	
+	BAL	(INITA)
+
+	L	R0,INITAD
+	ST	R0,DSADDR
+	ST	R0,SADDR
+	ST	R0,GADDR
+	IF USE_HEXCMD
+	MVI	R0,'I'
+	ST	R0,HEXMOD
+	ENDIF
+
+	IF USE_REGCMD
+	;; Initialize register save area
+	CLR	R0
+	ST	R0,REGR0
+	ST	R0,REGR1
+	ST	R0,REGR2
+	ST	R0,REGR3
+	ST	R0,REGR4
+	SBIT	R0,5		; M0 (IRQ0) Bit
+	ST	R0,REGSTR
+	L	R0,INITSP
+	ST	R0,REGSP
+	L	R0,INITAD
+	ST	R0,REGIC
+
+	;; Set up BREAK
+	L	R0,BREAKA
+	ST	R0,BRKADR
+	ENDIF			; USE_REGCMD
+
+	;; Opening message
+	L	X0,OMSGA
+	BAL	(C_STROUT)
+
+WSTART:	
+	L	X0,PROMPA
+	BAL	(C_STROUT)
+	BAL	(C_GETLIN)
+	EOR	X0,X0
+	MVI	X0,INBUF
+	BAL	(C_SKIPSP)
+	BAL	(C_UPPER)
+	MVB	R0,R0,NZ
+	B	WSTART
+
+	MVI	R1,'D'
+	CB	R0,R1,NZ
+	B	DUMP
+	MVI	R1,'G'
+	CB	R0,R1,NZ
+	B	(GOA)
+	MVI	R1,'S'
+	CB	R0,R1,NZ
+	B	(SETMA)
+
+	IF USE_HEXCMD
+	MVI	R1,'L'
+	CB	R0,R1,NZ
+	B	(LOADHA)
+	MVI	R1,'P'
+	CB	R0,R1,NZ
+	B	(SAVEHA)
+	ENDIF			; USE_HEXCMD
+
+	IF USE_REGCMD
+	MVI	R1,'R'
+	CB	R0,R1,NZ
+	B	(REGA)
+	ENDIF			; USE_REGCMD
+
+ERR:
+	L	X0,ERRMA
+	BAL	(C_STROUT)
+	B	WSTART
+
+ERRMA:	DC	ERRMSG
+INITA:	DC	INIT
+GOA:	DC	GO
+SETMA:	DC	SETM
+	IF USE_HEXCMD
+LOADHA:	DC	LOADH
+SAVEHA:	DC	SAVEH
+	ENDIF
+	IF USE_REGCMD
+REGA:	DC	REG
+	ENDIF
+
+
+;;; Dump memory
+
+DUMP:
+	AI	X0,1
+	BAL	(C_SKIPSP)
+	BAL	(C_RDHEX)	; 1st arg.
+	MV	R2,R2,Z
+	B	DP0
+	;; No arg.
+	BAL	(C_SKIPSP)
+	MVB	R0,R0,Z
+	B	ERR
+	L	R0,DSADDR
+	MVI	R1,64
+	A	R0,R1
+	ST	R0,DEADDR
+	B	DPM
+
+	;; 1st arg. found
+DP0:
+	ST	R4,DSADDR
+	BAL	(C_SKIPSP)
+	MVI	R1,','
+	CB	R0,R1,NZ
+	B	DP1
+	EOR	R1,R1
+	CB	R0,R1,Z
+	B	ERR
+	;; No 2nd arg.
+	MVI	R1,64
+	A	R4,R1
+	ST	R4,DEADDR
+	B	DPM
+DP1:
+	AI	X0,1
+	BAL	(C_SKIPSP)
+	BAL	(C_RDHEX)
+	BAL	(C_SKIPSP)
+	MV	R2,R2,NZ
+	B	ERR
+	EOR	R1,R1
+	CB	R0,R1,Z
+	B	ERR
+	AI	R4,1
+	ST	R4,DEADDR
+DPM:	
+	;; DUMP main
+	L	X0,DSADDR
+	L	R1,DPMC
+	AND	X0,R1
+	EOR	R1,R1
+	ST	R1,DSTATE
+DPM0:
+	BAL	DPL
+	BAL	(C_CONST)
+	MVB	R0,R0,Z
+	B	DPM1
+	L	R0,DSTATE
+	MVI	R1,2
+	CB	R0,R1,LPZ
+	B	DPM0
+	L	X0,DEADDR
+	ST	X0,DSADDR
+	B	(C_WSTART)
+DPM1:
+	ST	X0,DSADDR
+	BAL	(C_CONIN)
+	B	(C_WSTART)
+	
+DPMC:	DC	X'FFF8'
+
+DPL:
+	;; DUMP	line
+	MV	R0,X0
+	BAL	(C_HEXOUT4)
+	PUSH	X0
+	L	X0,DPLC0
+	BAL	(C_STROUT)
+	POP	X0
+	EOR	X1,X1
+	MVI	X1,INBUF
+	MVI	R2,8
+DPL0:
+	BAL	DPB
+	SI	R2,1,Z
+	B	DPL0
+
+	PUSH	X0
+	L	X0,DPLC1
+	BAL	(C_STROUT)
+
+	EOR	X0,X0
+	MVI	X0,INBUF
+	MVI	R2,8
+DPL1:
+	L	R0,0(X0)
+	BSWP	R0,R0
+	BAL	DPC
+	L	R0,0(X0)
+	BAL	DPC
+	AI	X0,1
+	SI	R2,1,Z
+	B	DPL1
+	POP	X0
+	B	(C_CRLF)
+	
+DPLC0:	DC	DSEP0
+DPLC1:	DC	DSEP1
+
+DPB:
+	;; DUMP byte
+	MVI	R0,' '
+	BAL	(C_CONOUT)
+	L	R0,DSTATE
+	MV	R0,R0,Z
+	B	DPB2
+	;; Dump state 0
+	L	R0,DSADDR
+	C	X0,R0,NZ
+	B	DPB1
+DPB0:
+	;; Still 0 or 2
+	MVI	R0,' '
+	ST	R0,0(X1)
+	PUSH	X0
+	L	X0,DPBC2
+	BAL	(C_STROUT)
+	POP	X0
+	AI	X0,1
+	AI	X1,1
+	RET
+DPB1:
+	;; Found start address
+	MVI	R1,1
+	ST	R1,DSTATE
+DPB2:
+	L	R0,DSTATE
+	MVI	R1,1
+	C	R0,R1,Z
+	B	DPB0
+	;; Dump state 1
+	L	R0,0(X0)
+	ST	R0,0(X1)
+	BAL	(C_HEXOUT4)
+	AI	X0,1
+	AI	X1,1
+	L	R0,DEADDR
+	C	X0,R0,Z
+	RET
+	;; Found end address
+	MVI	R0,2
+	ST	R0,DSTATE
+	RET
+DPBC2:	DC	DSEP2
+
+DPC:
+	MVI	R1,' '
+	CB	R0,R1,LPZ
+	B	DPC0
+	MVI	R1,X'7F'
+	CB	R0,R1,LM
+	B	DPC0
+	B	(C_CONOUT)
+DPC0:
+	MVI	R0,'.'
+	B	(C_CONOUT)
+
+;;;
+;;; GO address
+;;;
+GO:
+	AI	X0,1
+	BAL	(C_SKIPSP)
+	BAL	(C_RDHEX)
+	L	R0,0(X0)
+	MVB	R0,R0,Z
+	B	(C_ERR)
+	MV	R2,R2,Z
+
+	IF USE_REGCMD
+
+	ST	R4,REGIC
+
+	L	SP,REGSP
+	L	R0,REGIC
+	ST	R0,OPSW3+1
+	L	R0,REGSTR
+	ST	R0,OPSW3
+	L	R4,REGR4
+	L	R3,REGR3
+	L	R2,REGR2
+	L	R1,REGR1
+	L	R0,REGR0
+	LPSW	3
+
+	ELSE			; USE_REGCMD
+
+	ST	R4,GADDR
+	L	X1,GADDR
+	B	0(X1)
+
+	ENDIF			; USE_REGCMD
+
+;;;
+;;; SET memory
+;;;
+SETM:
+	AI	X0,1
+	BAL	(C_SKIPSP)
+	BAL	(C_RDHEX)
+	BAL	(C_SKIPSP)
+	L	R0,0(X0)
+	MVB	R0,R0,Z
+	B	(C_ERR)
+	MV	R2,R2,Z
+	B	SM0
+	L	R4,SADDR
+SM0:
+SM1:
+	MV	R0,X1
+	BAL	(C_HEXOUT4)
+	L	X0,DPLC0
+	BAL	(C_STROUT)
+	L	R0,0(X1)
+	BAL	(C_HEXOUT4)
+	MVI	R0,' '
+	BAL	(C_CONOUT)
+	BAL	(C_GETLIN)
+	MVI	X0,INBUF
+	BAL	(C_SKIPSP)
+	L	R0,0(X0)
+	EOR	R1,R1
+	CB	R0,R1,Z
+	B	SM2
+	;; Empty (Increment address)
+	AI	X1,1
+	ST	X1,SADDR
+	B	SM1
+SM2:
+	MVI	R1,'-'
+	CB	R0,R1,Z
+	B	SM3
+	;; '-' (Decrement address)
+	SI	X1,1
+	ST	X1,SADDR
+	B	SM1
+SM3:
+	MVI	R1,'.'
+	CB	R0,R1,Z
+	B	SM4
+	;; '.'  (Quit)
+	ST	X1,SADDR
+	B	(C_WSTART)
+SM4:
+	ST	X1,SADDR
+	BAL	(C_RDHEX)
+	MV	R2,R2,NZ
+	B	(C_ERR)
+	L	X0,SADDR
+	ST	R4,0(X0)
+	AI	X0,1
+	ST	X0,SADDR
+	MV	X1,X0
+	B	SM1
+
+;;; LOAD HEX file
+
+	IF USE_HEXCMD
+
+LOADH:	
+	AI	X0,1
+	BAL	(C_SKIPSP)
+	BAL	(C_RDHEX)
+	BAL	(C_SKIPSP)
+	L	R0,0(X0)
+	MVB	R0,R0,Z
+	B	(C_ERR)
+	ST	R4,OFFSET
+LH0:
+	BAL	(C_CONIN)
+	BAL	(C_UPPER)
+	MVI	R1,'S'
+	CB	R0,R1,NZ
+	B	LHS0
+LH1:
+	MVI	R1,':'
+	CB	R0,R1,NZ
+	B	LHI0
+LH2:
+	;; Skip to EOL
+	MVI	R1,CR
+	CB	R0,R1,NZ
+	B	LH0
+	MVI	R1,LF
+	CB	R0,R1,NZ
+	B	LH0
+LH3:
+	BAL	(C_CONIN)
+	B	LH2
+
+LHI0:
+	BAL	HEXIN
+	MV	R4,R0		; Checksum
+	SR	R0,RE,EZ
+	B	LHIE		; Odd length error
+	MV	R2,R0		; Count
+
+	BAL	HEXIN
+	A	R4,R0		; Checksum
+	CLR	X0
+	MVB	X0,R0
+	BSWP	X0,X0		; Address H
+
+	BAL	HEXIN
+	A	R4,R0		; Checksum
+	MVB	X0,R0		; Address L
+
+	SR	X0,RE,EZ
+	B	LHIE		; Odd address error
+	;; Add offset
+	L	R1,OFFSET
+	A	X0,R1
+
+	BAL	HEXIN
+	A	R4,R0		; Checksum
+	ST	R0,RECTYP
+	MVB	R0,R0,NZ
+	B	LHI00
+	MVI	R1,1
+	CB	R0,R1,NZ
+	B	LHI00
+	B	LH3		; Skip unsupported record type
+LHI00:
+	MVB	R2,R2,NZ
+	B	LHI3		; Length == 0
+LHI1:
+	BAL	HEXIN
+	A	R4,R0		; Checksum
+	PUSH	R0		; Data H
+
+	BAL	HEXIN
+	A	R4,R0		; Checksum
+	POP	R1
+	BSWP	R1,R1
+	MVB	R1,R0
+	MV	R0,R1
+	L	R1,RECTYP
+	MVB	R1,R1,Z
+	B	LHI2
+	ST	R0,0(X0)
+	AI	X0,1
+LHI2:
+	SI	R2,1,Z
+	B	LHI1
+LHI3:
+	BAL	HEXIN
+	A	R4,R0
+
+	CLR	R1
+	CB	R4,R1,Z
+	B	LHIE		; Checksum error
+	L	R0,RECTYP
+	MVI	R1,1
+	CB	R0,R1,Z
+	B	LH3
+	B	(C_WSTART)
+LHIE:
+	L	X0,LHIC
+	BAL	(C_STROUT)
+	B	(C_WSTART)
+LHIC:	DC	IHEMSG
+
+HEXIN:
+	CLR	R0
+	BAL	HI0
+	SL	R0,RE
+	SL	R0,RE
+	SL	R0,RE
+	SL	R0,RE
+HI0:
+	PUSH	R0
+	BAL	(C_CONIN)
+	BAL	(C_UPPER)
+	MVI	R1,'0'
+	CB	R0,R1,LPZ
+	B	HIR
+	MVI	R1,'9'+1
+	CB	R0,R1,LPZ
+	B	HI1
+	MVI	R1,'A'
+	CB	R0,R1,LPZ
+	B	HIR
+	MVI	R1,'F'+1
+	CB	R0,R1,LM
+	B	HIR
+	MVI	R1,'A'-'9'-1
+	S	R0,R1
+HI1:
+	MVI	R1,'0'
+	S	R0,R1
+	POP	R1
+	OR	R0,R1
+	RET
+HIR:
+	POP	R1
+	RET
+
+LHS0:
+	BAL	(C_CONIN)
+	MVI	R1,'1'
+	CB	R0,R1,NZ
+	B	LHS00
+	MVI	R1,'9'
+	CB	R0,R1,NZ
+	B	LHS01
+	B	LH3		; Unsupported record type
+LHS00:
+	CLR	R1
+	B	LHS02
+LHS01:
+	MVI	R1,1
+LHS02:
+	ST	R1,RECTYP
+
+	BAL	HEXIN
+	MV	R4,R0		; Checksum
+	SI	R0,3
+	SR	R0,RE,EZ
+	B	LHSE		; Odd length error
+	MV	R2,R0		; Count
+
+	BAL	HEXIN
+	A	R4,R0		; Checksum
+	CLR	X0
+	MVB	X0,R0
+	BSWP	X0,X0		; Address H
+
+	BAL	HEXIN
+	A	R4,R0		; Checksum
+	MVB	X0,R0		; Address L
+
+	SR	X0,RE,EZ
+	B	LHSE		; Odd address error
+	;; Add offset
+	L	R1,OFFSET
+	A	X0,R1
+
+	MVB	R2,R2,NZ
+	B	LHS3
+LHS1:
+	BAL	HEXIN
+	A	R4,R0		; Checksum
+	PUSH	R0		; Data H
+
+	BAL	HEXIN
+	A	R4,R0		; Checksum
+	POP	R1
+	BSWP	R1,R1
+	MVB	R1,R0
+	MV	R0,R1
+
+	L	R1,RECTYP
+	MVB	R1,R1,Z
+	B	LHS2
+	ST	R0,0(X0)
+	AI	X0,1
+LHS2:
+	SI	R2,1,Z
+	B	LHS1
+LHS3:
+	BAL	HEXIN
+	A	R4,R0
+	MVI	R1,X'FF'
+	CB	R4,R1,Z
+	B	LHSE		; Checksum error
+
+	L	R0,RECTYP
+	MVI	R1,1
+	CB	R0,R1,NZ
+	B	(C_WSTART)
+	B	(LHSC0)
+LHSE:
+	L	X0,LHSC1
+	BAL	(C_STROUT)
+	B	(C_WSTART)
+LHSC0:	DC	LH3
+LHSC1:	DC	SHEMSG
+
+;;; SAVE HEX file
+
+SAVEH:
+	AI	X0,1
+	L	R0,0(X0)
+	BAL	(C_UPPER)
+	MVI	R1,'I'
+	CB	R0,R1,NZ
+	B	SH0
+	MVI	R1,'S'
+	CB	R0,R1,Z
+	B	SH1
+SH0:
+	ST	R0,HEXMOD
+	AI	X0,1
+SH1:
+	BAL	(C_SKIPSP)
+	BAL	(C_RDHEX)
+	MV	R2,R2,NZ
+	B	(C_ERR)
+	ST	R4,OFFSET	; Start address
+	BAL	(C_SKIPSP)
+	L	R0,0(X0)
+	MVI	R1,','
+	CB	R0,R1,Z
+	B	(C_ERR)
+	AI	X0,1
+	BAL	(C_SKIPSP)
+	BAL	(C_RDHEX)
+	MV	R2,R2,NZ
+	B	(C_ERR)
+	BAL	(C_SKIPSP)
+	L	R0,0(X0)
+	CLR	R1
+	CB	R0,R1,Z
+	B	(C_ERR)
+SH2:
+	AI	R4,1
+	L	X0,OFFSET	; X0 = Start address
+	S	R4,X0		; R4 = Length
+SH3:
+	BAL	SHL
+	MV	R4,R4,Z
+	B	SH3
+
+	L	R0,HEXMOD
+	MVI	R1,'I'
+	CB	R0,R1,Z
+	B	SH4
+
+	L	X0,SHC0
+	BAL	(C_STROUT)
+	B	(C_WSTART)
+SH4:
+	L	X0,SHC1
+	BAL	(C_STROUT)
+	B	(C_WSTART)
+
+SHC0:	DC	IHEXER
+SHC1:	DC	SRECER
+
+SHL:
+	CLR	R2
+	MVI	R2,8		; 8 words per line
+	C	R4,R2,LPZ
+	MV	R2,R4
+	S	R4,R2
+	ST	R2,OFFSET	; Count = ( length > 8 ) ? 8 : length
+
+	L	R0,HEXMOD
+	MVI	R1,'I'
+	CB	R0,R1,Z
+	B	SHLS
+
+	;; Intel HEX
+	MVI	R0,':'
+	BAL	(C_CONOUT)
+
+	SL	R2,RE		; Byte count
+	MV	R0,R2		; Length, R2 = Checksum
+	BAL	(HEXOUT2A)
+
+	MV	R0,X0		; Address H
+	SL	R0,RE
+	BSWP	R0,R0
+	A	R2,R0		; Checksum
+	BAL	(HEXOUT2A)
+
+	MV	R0,X0		; Address L
+	SL	R0,RE
+	A	R2,R0		; Checksum
+	BAL	(HEXOUT2A)
+
+	CLR	R0
+	BAL	(HEXOUT2A)
+SHLI0:
+	L	R0,0(X0)
+	AI	X0,1
+	PUSH	R0
+
+	BSWP	R0,R0
+	A	R2,R0		; Checksum
+	BAL	HEXOUT2
+
+	POP	R0
+	A	R2,R0		; Checksum
+	BAL	HEXOUT2
+
+	DMS	OFFSET		; Count
+	B	SHLI0
+
+	CLR	R0
+	S	R0,R2
+	BAL	HEXOUT2
+	B	(C_CRLF)
+
+HEXOUT2A:
+	DC	HEXOUT2
+
+SHLS:
+	;; Motorola S record
+	MVI	R0,'S'
+	BAL	(C_CONOUT)
+	MVI	R0,'1'
+	BAL	(C_CONOUT)
+
+	SL	R2,RE		; Byte count
+	AI	R2,2+1
+	MV	R0,R2
+	BAL	HEXOUT2
+
+	MV	R0,X0
+	SL	R0,RE
+	PUSH	R0
+	BSWP	R0,R0		; Address H
+	A	R2,R0		; Checksum
+	BAL	HEXOUT2
+
+	POP	R0		; Address L
+	A	R2,R0		; Checksum
+	BAL	HEXOUT2
+SHLS0:
+	L	R0,0(X0)
+	AI	X0,1
+	PUSH	R0
+
+	BSWP	R0,R0		; Data H
+	A	R2,R0		; Checksum
+	BAL	HEXOUT2
+
+	POP	R0		; Data L
+	A	R2,R0		; Checksum
+	BAL	HEXOUT2
+
+	DMS	OFFSET
+	B	SHLS0
+
+	CLR	R0
+	SI	R0,1
+	EOR	R0,R2
+	BAL	HEXOUT2
+	B	(C_CRLF)
+	
+	ENDIF			; USE_HEXCMD
+
+;;; Register
+
+	IF USE_REGCMD
+
+REG:
+	AI	X0,1
+	BAL	(C_SKIPSP)
+	L	R0,0(X0)
+	BAL	(C_UPPER)
+	CLR	R1
+	CB	R0,R1,Z
+	B	RG0
+	BAL	RDUMP
+	B	(C_WSTART)
+RG0:
+	L	X1,RNTABA
+RG1:
+	L	R1,0(X1)
+	CB	R0,R1,NZ
+	B	RG2		; Character match
+	MV	R1,R1,NZ
+	B	(C_ERR)		; Found end mark
+	AI	X1,3
+	B	RG1
+RG2:
+	BSWP	R1,R1
+	MVI	R2,X'0F'
+	CB	R1,R2,Z
+	B	RG3
+	;; Next table
+	L	X1,1(X1)
+	AI	X0,1
+	L	R0,(X0)
+	BAL	(C_UPPER)
+	B	RG1
+RG3:
+	MV	R1,R1,NZ
+	B	(C_ERR)		; Found end mark
+
+	L	X0,2(X1)	; Reg. name
+	BAL	STROUT
+	MVI	R0,'='
+	BAL	(C_CONOUT)
+
+	L	X0,1(X1)	; Reg. storage address
+	L	R0,0(X0)
+	BAL	HEXOUT4
+	MVI	R0,' '
+	BAL	(C_CONOUT)
+	PUSH	X0
+
+	BAL	(C_GETLIN)
+	MVI	X0,INBUF
+	BAL	SKIPSP
+	BAL	RDHEX
+	MV	R2,R2,NZ
+	B	(C_WSTART)
+	POP	X0		; Reg. storage address
+	ST	R4,0(X0)
+	B	(C_WSTART)
+
+RNTABA:	DC	RNTAB
+RDTABA:	DC	RDTAB
+
+RDUMP:
+	L	X1,RDTABA
+RD0:
+	L	X0,0(X1)
+	MV	X0,X0,NZ
+	B	(C_CRLF)	; End
+	BAL	STROUT
+
+	L	X0,1(X1)
+	L	R0,0(X0)
+	BAL	(C_HEXOUT4)
+	AI	X1,2
+	B	RD0
+
+	ENDIF			; USE_REGCMD
+
+;;; Other support routines
+	
+STROUT:
+	L	R0,0(X0)
+	BSWP	R0,R0	
+	L	R1,SOUTC
+	AND	R0,R1,NZ
+	B	SOUTR
+	BAL	(C_CONOUT)
+	L	R0,0(X0)
+	L	R1,SOUTC
+	AND	R0,R1,NZ
+	B	SOUTR
+	BAL	(C_CONOUT)
+	AI	X0,1
+	B	STROUT
+SOUTR:
+	RET
+SOUTC:	DC	X'00FF'
+
+HEXOUT4:
+	PUSH	R0
+	BSWP	R0,R0
+	BAL	HEXOUT2
+	POP	R0
+HEXOUT2:
+	PUSH	R0
+	SR	R0,RE
+	SR	R0,RE
+	SR	R0,RE
+	SR	R0,RE
+	BAL	HEXOUT1
+	POP	R0
+HEXOUT1:
+	MVI	R1,X'0F'
+	AND	R0,R1
+	MVI	R1,'0'
+	A	R0,R1
+	MVI	R1,'9'
+	CB	R0,R1,LP
+	B	(C_CONOUT)
+	MVI	R1,'A'-'9'-1
+	A	R0,R1
+	B	(C_CONOUT)
+
+CRLF:
+	MVI	R0,CR
+	BAL	(C_CONOUT)
+	MVI	R0,LF
+	B	(C_CONOUT)
+
+GETLIN:
+	EOR	X0,X0
+	MVI	X0,INBUF
+	EOR	R2,R2
+GL0:
+	BAL	(C_CONIN)
+	MVI	R1,CR
+	CB	R0,R1,NZ
+	B	GLE
+	MVI	R1,LF
+	CB	R0,R1,NZ
+	B	GLE
+	MVI	R1,BS
+	CB	R0,R1,NZ
+	B	GLB
+	MVI	R1,DEL
+	CB	R0,R1,NZ
+	B	GLB
+	MVI	R1,' '
+	CB	R0,R1,LPZ
+	B	GL0
+	MVI	R1,X'80'
+	CB	R0,R1,LM
+	B	GL0
+	MVI	R1,BUFLEN-1
+	CB	R2,R1,LM
+	B	GL0		; Too long
+	L	R1,SOUTC
+	AND	R0,R1
+	ST	R0,0(X0)
+	AI	X0,1
+	BAL	(C_CONOUT)
+	AI	R2,1
+	B	GL0
+GLB:
+	MVB	R2,R2,NZ
+	B	GL0
+	SI	R2,1
+	SI	X0,1
+	MVI	R0,BS
+	BAL	(C_CONOUT)
+	MVI	R0,' '
+	BAL	(C_CONOUT)
+	MVI	R0,BS
+	BAL	(C_CONOUT)
+	B	GL0
+GLE:
+	BAL	CRLF
+	MVI	R0,0
+	ST	R0,0(X0)
+	RET
+
+SKIPSP:
+	L	R0,0(X0)
+	AI	X0,1
+	MVI	R1,' '
+	CB	R0,R1,NZ
+	B	SKIPSP
+	SI	X0,1
+	RET
+
+UPPER:
+	MVI	R1,'a'
+	CB	R0,R1,LPZ
+	B	UPR
+	MVI	R1,'z'+1
+	CB	R0,R1,LM
+	B	UPR
+	MVI	R1,'a'-'A'
+	S	R0,R1
+UPR:
+	RET
+
+RDHEX:
+	EOR	R2,R2
+	EOR	R4,R4
+RH0:
+	L	R0,0(X0)
+	BAL	UPPER
+	MVI	R1,'0'
+	CB	R0,R1,LPZ
+	B	RHE
+	MVI	R1,'9'
+	CB	R0,R1,LP
+	B	RH1
+	MVI	R1,'A'
+	CB	R0,R1,LPZ
+	B	RHE
+	MVI	R1,'F'
+	CB	R0,R1,LMZ
+	B	RHE
+	MVI	R1,'A'-'9'-1
+	S	R0,R1
+RH1:
+	MVI	R1,'0'
+	S	R0,R1
+	SL	R4,RE
+	SL	R4,RE
+	SL	R4,RE
+	SL	R4,RE
+	A	R4,R0
+	AI	X0,1
+	AI	R2,1
+	B	RH0
+RHE:
+	RET
+
+	;;
+	;; IRQ0 Handler
+	;;
+
+	IF USE_REGCMD
+	IF CPU_MN1613
+IRQ0H:
+	PUSH	R0
+	CPYH	R0,IISR
+	TBIT	R0,15,NZ
+	B	IRQ0HR
+	SETH	R0,IISR		; Clear IISR
+
+	POP	R0
+	ST	R0,REGR0
+	ST	R1,REGR1
+	ST	R2,REGR2
+	ST	R3,REGR3
+	ST	R4,REGR4
+	ST	SP,REGSP
+	L	R0,OPSW0
+	ST	R0,REGSTR
+	L	R0,OPSW0+1
+	ST	R0,REGIC
+
+	ENDIF			; CPU_MN1613
+IRQ0HD:	
+	L	X0,IRQ0C0
+	BAL	(C_STROUT)
+	BAL	(IRQ0C1)
+	B	(C_WSTART)
+
+IRQ0HR:
+	POP	R0
+	LPSW	0
+
+BREAK:
+	PUSH	STR
+	ST	R0,REGR0
+	ST	R1,REGR1
+	ST	R2,REGR2
+	ST	R3,REGR3
+	ST	R4,REGR4
+	POP	R0
+	ST	R0,REGSTR
+	POP	R0
+	SI	R0,1		; Adjust IC to point 'BREAK' instruction
+	ST	R0,REGIC
+	ST	SP,REGSP
+	B	IRQ0HD
+	
+IRQ0C0:	DC	BRKMSG
+IRQ0C1:	DC	RDUMP
+
+	ENDIF			; USE_REGCMD
+
+;;;
+;;; Data area
+;;;
+
+OPNMSG:
+        DC      "\r\nUniversal Monitor MN1610\r\n\0"
+PROMPT:
+	DC	"] \0"
+IHEMSG:
+	DC	"Error ihex\r\n\0"
+SHEMSG:
+	DC	"Error srec\r\n\0"
+ERRMSG:
+	DC	"Error\r\n\0"
+DSEP0:
+	DC	" :\0"
+DSEP1:
+	DC	" : \0"
+DSEP2:
+	DC	"    \0"
+IHEXER:
+        DC	":00000001FF\r\n\0"
+SRECER:
+        DC	"S9030000FC\r\n\0"
+BRKMSG:
+	DC	"BREAK\r\n\0"
+
+	IF USE_REGCMD
+
+	;; Register dump table
+RDTAB:	DC	RDR0,  REGR0
+	DC	RDR1,  REGR1
+	DC	RDR2,  REGR2
+	DC	RDR3,  REGR3
+	DC	RDR4,  REGR4
+	DC	RDSP,  REGSP
+	DC	RDSTR, REGSTR
+	DC	RDIC,  REGIC
+	DC	0, 0
+
+RDR0:	DC	"R0=\0"
+RDR1:	DC	" R1=\0"
+RDR2:	DC	" R2=\0"
+RDR3:	DC	" R3=\0"
+RDR4:	DC	" R4=\0"
+RDSP:	DC	" SP=\0"
+RDSTR:	DC	" STR=\0"
+RDIC:	DC	" IC=\0"
+
+RNTAB:
+	DC	'I'+X'0F00'
+	DC	RNTABI,0
+	DC	'R'+X'0F00'
+	DC	RNTABR,0
+	DC	'S'+X'0F00'
+	DC	RNTABS,0
+	DC	'X'+X'0F00'
+	DC	RNTABX,0
+
+	DC	0
+
+RNTABI:
+	DC	'C'
+	DC	REGIC,RNIC
+
+	DC	0
+
+RNTABR:
+	DC	'0'
+	DC	REGR0,RNR0
+	DC	'1'
+	DC	REGR1,RNR1
+	DC	'2'
+	DC	REGR2,RNR2
+	DC	'3'
+	DC	REGR3,RNR3
+	DC	'4'
+	DC	REGR4,RNR4
+
+	DC	0
+
+RNTABS:
+	DC	'P'
+	DC	REGSP,RNSP
+	DC	'T'+X'0F00'
+	DC	RNTABST,0
+
+	DC	0
+
+RNTABST:
+	DC	'R'
+	DC	REGSTR,RNSTR
+
+	DC	0
+
+RNTABX:
+	DC	'0'
+	DC	REGR3,RNX0
+	DC	'1'
+	DC	REGR4,RNX1
+
+	DC	0
+
+RNIC:	DC	"IC\0"
+RNR0:	DC	"R0\0"
+RNR1:	DC	"R1\0"
+RNR2:	DC	"R2\0"
+RNR3:	DC	"R3\0"
+RNR4:	DC	"R4\0"
+RNSP:	DC	"SP\0"
+RNSTR:	DC	"STR\0"
+RNX0:	DC	"X0\0"
+RNX1:	DC	"X1\0"
+
+	ENDIF			; USE_REGCMD
+
+	IF USE_DEV_EMILY
+	INCLUDE	"dev/dev_emily.asm"
+	ENDIF
+
+;;;
+;;; RAM area
+;;;
+
+	;;
+	;; Work	Area
+	;;
+
+	ORG	WORK_B
+
+INBUF:	DS	BUFLEN		; Line input buffer
+DSADDR:	DS	1		; Dump start address
+DEADDR:	DS	1		; Dump end address
+DSTATE:	DS	1		; Dump state
+GADDR:	DS	1		; Go address
+SADDR:	DS	1 		; Set address
+
+	IF USE_HEXCMD
+HEXMOD:	DS	1		; HEX file mode
+RECTYP:	DS	1		; Record type
+OFFSET:	DS	1		; Offset
+	ENDIF			; USE_HEXCMD
+
+	IF USE_REGCMD
+REG_B:
+REGR0:	DS	1
+REGR1:	DS	1
+REGR2:	DS	1
+REGR3:	DS	1
+REGR4:	DS	1
+REGSP:	DS	1
+REGSTR:	DS	1
+REGIC:	DS	1
+REG_E:
+	ENDIF			; USE_REGCMD
+
+	END

@@ -1,0 +1,38 @@
+;;;
+;;;
+;;; 
+
+
+INIT:
+	LDAA	#RMCR_V
+	STAA	RMCR
+	LDAA	#$0A		; Enable TX,RX
+	STAA	TRCSR
+	
+	RTS
+
+CONIN:
+	LDAA	TRCSR
+	ANDA	#$80
+	BEQ	CONIN
+	LDAA	RDR
+
+	RTS
+
+CONST:
+	LDAA	TRCSR
+	ANDA	#$80
+
+	RTS
+
+CONOUT:
+	PSHA
+CO0:
+	LDAA	TRCSR
+	ANDA	#$20
+	BEQ	CO0
+	PULA
+	STAA	TDR
+
+	RTS
+	

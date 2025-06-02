@@ -1,0 +1,35 @@
+;;;
+;;;	8051 internal UART Console Driver
+;;;
+
+INIT:
+	MOV	PCON,#PCON_V
+
+	MOV	TMOD,#TMOD_V
+	MOV	TH1,#TH1_V
+	MOV	TCON,#TCON_V
+
+	MOV	SCON,#SCON_V
+	MOV	SBUF,#00H	; Dummy
+	
+	RET
+
+CONIN:
+	JNB	RI,CONIN
+	MOV	A,SBUF
+	CLR	RI
+
+	RET
+
+CONST:
+	MOV	A,SCON
+	ANL	A,#01H		; RI
+
+	RET
+
+CONOUT:
+	JNB	TI,CONOUT
+	MOV	SBUF,A
+	CLR	TI
+
+	RET
