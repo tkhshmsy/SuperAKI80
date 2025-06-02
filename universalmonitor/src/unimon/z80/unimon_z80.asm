@@ -2023,6 +2023,10 @@ RNR:	DB	"R",00H
 	INCLUDE	"dev/dev_emily.asm"
 	ENDIF
 
+	IF USE_DEV_Z80SIO_CTC3
+	INCLUDE	"dev/dev_z80sio_ctc3.asm"
+	ENDIF
+
 ;;;
 ;;; RAM area
 ;;;
