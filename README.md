@@ -5,8 +5,8 @@
 ## Index
 - [最小限セットアップ](./setup/README.md)
 - [Universal Monitor](./universalmonitor/README.md)
-- 追加回路
-  - リセットボタン
+- [追加回路](./boards/)
+  - [リセットボタン](./boards/reset-button/README.md)
   - シリアルクロック分離
   - VDP
 
