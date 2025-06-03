@@ -4,10 +4,10 @@
 
 ## Index
 - [最小限セットアップ](./setup/README.md)
-- 改良
-  - UniversalMonitor
+- [Universal Monitor](./universalmonitor/README.md)
+- 追加回路
+  - リセットボタン
   - シリアルクロック分離
-- 追加
   - VDP
 
 ## Reference
@@ -20,6 +20,7 @@
 
 ## License
 - [MIT](./LICENSE)
+  - 転載・改変・フォークしたものを除く
 
 ## Author
 - [tkhshmsy@gmail.com](tkhsmsy@gmail.com)
