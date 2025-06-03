@@ -19,7 +19,7 @@ INIT:
 	ENDIF			; USE_CTC
 
 	IF USE_Z80CTC3
-	LD	A,07H		; Timer mode, 1/16, fall-edge, no ext trigger
+	LD	A,CTC_V
 	OUT	(CTC3),A
 	LD	A,TC_V
 	OUT	(CTC3),A

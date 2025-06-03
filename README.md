@@ -7,7 +7,7 @@
 - [Universal Monitor](./universalmonitor/README.md)
 - [追加回路](./boards/)
   - [リセットボタン](./boards/reset-button/README.md)
-  - シリアルクロック分離
+  - [シリアルクロック分離](./boards/external-serial-clock/README.md)
   - VDP
 
 ## Reference

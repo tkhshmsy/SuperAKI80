@@ -129,10 +129,10 @@ SMREG:	EQU	0FF0H
 	ENDIF
 
 ;;; Zilog Z80 SIO
-	
+
 USE_DEV_Z80SIO_CTC3 = 1
 	IF USE_DEV_Z80SIO_CTC3
-SIOAD:	equ	18H		; 
+SIOAD:	equ	18H		;
 SIOAC:	equ	19H		;
 SIOBD:	equ	1AH		; (Ch.B not supported)
 SIOBC:	equ	1BH		; (Ch.B not supported)
@@ -143,7 +143,7 @@ CTC0:	EQU	10H
 CTC1:	EQU	11H
 CTC2:	EQU	12H
 CTC3:	EQU	13H
-USE_Z80CTC3EXT = 0
+USE_Z80CTC3EXT = 1
 	IF USE_Z80CTC3EXT
 CTC_V:	EQU 71		; Counter mode, fall-edge, ext trigger
 TC_V:	EQU	1		; pass to TXCA/RXCA
