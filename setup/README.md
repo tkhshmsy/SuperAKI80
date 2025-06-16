@@ -212,7 +212,7 @@ Z-VISION向けintel HEX ローダーも利用可能。接続したら、
 
 #### Grant's Z80 BASIC
 
-サンプルとして、BASIC インタプリタを実行し、サンプルとして(またもや)ASCIIARTを実行してみる。
+サンプルとして、BASIC インタプリタを実行し、(またもや)ASCIIARTを実行してみる。
 
 - Grant's Z80 BASIC
   - [Grant's 7-chip Z80 computer](http://searle.x10host.com/z80/SimpleZ80.html)

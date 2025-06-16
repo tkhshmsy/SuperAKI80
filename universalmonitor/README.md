@@ -206,7 +206,7 @@ Makefile  config  config.inc  dev  unimon_z80.asm  unimon_z80.hex  unimon_z80.ls
 
 ```bash
 ## hex ファイルの書き込み位置を変更
-$ objcopy -I ihex -O ihex --change-address 0x8000 ./unimon_z80.hex ./unimon_superaki80.hex
+$ objcopy -I ihex -O ihex --change-address 0x8000 ./unimon_z80.hex ./unimon_superaki80-W27C512.hex
 
 ## ブランクチェック
 $ minipro -p W27C512@DIP28 -b
@@ -219,7 +219,7 @@ Reading Code...  0.30Sec  OK
 Code memory section is blank.
 
 ## 書き込み
-$ minipro -p W27C512@DIP28 -w ./unimon_superaki80.hex
+$ minipro -p W27C512@DIP28 -w ./unimon_superaki80-W27C512.hex
 Found T48 01.1.03 (0x103)
 Warning: T48 support is experimental!
 Device code: 34C12301
